@@ -43,8 +43,8 @@
 #include "dawn/native/d3d/D3DError.h"
 #include "dawn/native/d3d/UtilsD3D.h"
 #include "dawn/native/d3d11/DeviceD3D11.h"
-#include "dawn/native/d3d11/FenceD3D11.h"
 #include "dawn/native/d3d11/Forward.h"
+#include "dawn/native/d3d11/SharedFenceD3D11.h"
 #include "dawn/native/d3d11/SharedTextureMemoryD3D11.h"
 #include "dawn/native/d3d11/UtilsD3D11.h"
 
@@ -227,7 +227,7 @@ ResultOrError<Ref<Texture>> Texture::CreateExternalImage(
     Device* device,
     const UnpackedPtr<TextureDescriptor>& descriptor,
     ComPtr<IUnknown> d3dTexture,
-    std::vector<Ref<d3d::Fence>> waitFences,
+    std::vector<FenceAndSignalValue> waitFences,
     bool isSwapChainTexture,
     bool isInitialized) {
     Ref<Texture> dawnTexture = AcquireRef(new Texture(device, descriptor, Kind::Normal));
@@ -313,6 +313,8 @@ MaybeError Texture::InitializeAsInternalTexture() {
     }
 
     switch (GetDimension()) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D: {
             D3D11_TEXTURE1D_DESC desc = GetD3D11TextureDesc<D3D11_TEXTURE1D_DESC>();
             ComPtr<ID3D11Texture1D> d3d11Texture1D;
@@ -362,17 +364,17 @@ MaybeError Texture::InitializeAsSwapChainTexture(ComPtr<ID3D11Resource> d3d11Tex
 }
 
 MaybeError Texture::InitializeAsExternalTexture(ComPtr<IUnknown> d3dTexture,
-                                                std::vector<Ref<d3d::Fence>> waitFences,
+                                                std::vector<FenceAndSignalValue> waitFences,
                                                 bool isSwapChainTexture) {
     ComPtr<ID3D11Resource> d3d11Texture;
     DAWN_TRY(CheckHRESULT(d3dTexture.As(&d3d11Texture), "Query ID3D11Resource from IUnknown"));
 
     Device* device = ToBackend(GetDevice());
     auto commandContext = device->GetScopedPendingCommandContext(Device::SubmitMode::Normal);
-    for (Ref<d3d::Fence>& fence : waitFences) {
-        DAWN_TRY(CheckHRESULT(commandContext.Wait(static_cast<Fence*>(fence.Get())->GetD3D11Fence(),
-                                                  fence->GetFenceValue()),
-                              "ID3D11DeviceContext4::Wait"));
+    for (const auto& fence : waitFences) {
+        DAWN_TRY(CheckHRESULT(
+            commandContext.Wait(ToBackend(fence.object)->GetD3DFence(), fence.signaledValue),
+            "ID3D11DeviceContext4::Wait"));
     }
     mD3d11Resource = std::move(d3d11Texture);
     SetLabelHelper("Dawn_ExternalTexture");
@@ -416,6 +418,8 @@ ResultOrError<ComPtr<ID3D11RenderTargetView>> Texture::CreateD3D11RenderTargetVi
         rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMS;
     } else {
         switch (GetDimension()) {
+            case wgpu::TextureDimension::Undefined:
+                DAWN_UNREACHABLE();
             case wgpu::TextureDimension::e2D:
                 // Currently we always use D3D11_TEX2D_ARRAY_RTV because we cannot specify base
                 // array layer and layer count in D3D11_TEX2D_RTV. For 2D texture views, we treat
@@ -1066,6 +1070,8 @@ MaybeError Texture::CopyInternal(const ScopedCommandRecordingContext* commandCon
     srcBox.top = src.origin.y;
     srcBox.bottom = src.origin.y + copy->copySize.height;
     switch (src.texture->GetDimension()) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
         case wgpu::TextureDimension::e2D:
             srcBox.front = 0;
@@ -1075,8 +1081,6 @@ MaybeError Texture::CopyInternal(const ScopedCommandRecordingContext* commandCon
             srcBox.front = src.origin.z;
             srcBox.back = src.origin.z + copy->copySize.depthOrArrayLayers;
             break;
-        default:
-            DAWN_UNREACHABLE();
     }
 
     bool isWholeSubresource =

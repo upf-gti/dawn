@@ -32,6 +32,7 @@
 #include <mutex>
 #include <utility>
 
+#include "absl/container/flat_hash_set.h"
 #include "dawn/common/Log.h"
 #include "dawn/common/Version_autogen.h"
 #include "dawn/native/AsyncTask.h"
@@ -122,7 +123,7 @@ auto GetOrCreate(ContentLessObjectCache<RefCountedT>& cache,
 }
 
 struct DeviceBase::DeprecationWarnings {
-    std::unordered_set<std::string> emitted;
+    absl::flat_hash_set<std::string> emitted;
     size_t count = 0;
 };
 
@@ -836,6 +837,19 @@ const Format& DeviceBase::GetValidInternalFormat(FormatIndex index) const {
     DAWN_ASSERT(index < mFormatTable.size());
     DAWN_ASSERT(mFormatTable[index].IsSupported());
     return mFormatTable[index];
+}
+
+std::vector<const Format*> DeviceBase::GetCompatibleViewFormats(const Format& format) const {
+    wgpu::TextureFormat viewFormat =
+        format.format == format.baseFormat ? format.baseViewFormat : format.baseFormat;
+    if (viewFormat == wgpu::TextureFormat::Undefined) {
+        return {};
+    }
+    const Format& f = mFormatTable[ComputeFormatIndex(viewFormat)];
+    if (!f.IsSupported()) {
+        return {};
+    }
+    return {&f};
 }
 
 ResultOrError<Ref<BindGroupLayoutBase>> DeviceBase::GetOrCreateBindGroupLayout(
@@ -1583,15 +1597,18 @@ void DeviceBase::APIInjectError(wgpu::ErrorType type, const char* message) {
     HandleError(DAWN_MAKE_ERROR(FromWGPUErrorType(type), message), InternalErrorType::OutOfMemory);
 }
 
-void DeviceBase::APIValidateTextureDescriptor(const TextureDescriptor* desc) {
+void DeviceBase::APIValidateTextureDescriptor(const TextureDescriptor* descriptorOrig) {
     AllowMultiPlanarTextureFormat allowMultiPlanar;
     if (HasFeature(Feature::MultiPlanarFormatExtendedUsages)) {
         allowMultiPlanar = AllowMultiPlanarTextureFormat::Yes;
     } else {
         allowMultiPlanar = AllowMultiPlanarTextureFormat::No;
     }
+
+    TextureDescriptor rawDescriptor = descriptorOrig->WithTrivialFrontendDefaults();
+
     UnpackedPtr<TextureDescriptor> unpacked;
-    if (!ConsumedError(ValidateAndUnpack(desc), &unpacked)) {
+    if (!ConsumedError(ValidateAndUnpack(&rawDescriptor), &unpacked)) {
         DAWN_UNUSED(ConsumedError(ValidateTextureDescriptor(this, unpacked, allowMultiPlanar)));
     }
 }
@@ -1826,14 +1843,20 @@ ResultOrError<Ref<RenderPipelineBase>> DeviceBase::CreateUninitializedRenderPipe
     return CreateUninitializedRenderPipelineImpl(Unpack(&appliedDescriptor));
 }
 
-ResultOrError<Ref<SamplerBase>> DeviceBase::CreateSampler(const SamplerDescriptor* descriptor) {
-    const SamplerDescriptor defaultDescriptor = {};
+ResultOrError<Ref<SamplerBase>> DeviceBase::CreateSampler(const SamplerDescriptor* descriptorOrig) {
     DAWN_TRY(ValidateIsAlive());
-    descriptor = descriptor != nullptr ? descriptor : &defaultDescriptor;
-    if (IsValidationEnabled()) {
-        DAWN_TRY_CONTEXT(ValidateSamplerDescriptor(this, descriptor), "validating %s", descriptor);
+
+    SamplerDescriptor descriptor = {};
+    if (descriptorOrig) {
+        descriptor = descriptorOrig->WithTrivialFrontendDefaults();
     }
-    return GetOrCreateSampler(descriptor);
+
+    if (IsValidationEnabled()) {
+        DAWN_TRY_CONTEXT(ValidateSamplerDescriptor(this, &descriptor), "validating %s",
+                         &descriptor);
+    }
+
+    return GetOrCreateSampler(&descriptor);
 }
 
 ResultOrError<Ref<ShaderModuleBase>> DeviceBase::CreateShaderModule(
@@ -1885,8 +1908,11 @@ ResultOrError<Ref<SwapChainBase>> DeviceBase::CreateSwapChain(
     return newSwapChain;
 }
 
-ResultOrError<Ref<TextureBase>> DeviceBase::CreateTexture(const TextureDescriptor* rawDescriptor) {
+ResultOrError<Ref<TextureBase>> DeviceBase::CreateTexture(const TextureDescriptor* descriptorOrig) {
     DAWN_TRY(ValidateIsAlive());
+
+    TextureDescriptor rawDescriptor = descriptorOrig->WithTrivialFrontendDefaults();
+
     UnpackedPtr<TextureDescriptor> descriptor;
     if (IsValidationEnabled()) {
         AllowMultiPlanarTextureFormat allowMultiPlanar;
@@ -1895,13 +1921,14 @@ ResultOrError<Ref<TextureBase>> DeviceBase::CreateTexture(const TextureDescripto
         } else {
             allowMultiPlanar = AllowMultiPlanarTextureFormat::No;
         }
-        DAWN_TRY_ASSIGN_CONTEXT(descriptor, ValidateAndUnpack(rawDescriptor), "validating %s.",
-                                rawDescriptor);
+        DAWN_TRY_ASSIGN_CONTEXT(descriptor, ValidateAndUnpack(&rawDescriptor), "validating %s.",
+                                &rawDescriptor);
         DAWN_TRY_CONTEXT(ValidateTextureDescriptor(this, descriptor, allowMultiPlanar),
                          "validating %s.", descriptor);
     } else {
-        descriptor = Unpack(rawDescriptor);
+        descriptor = Unpack(&rawDescriptor);
     }
+
     return CreateTextureImpl(descriptor);
 }
 

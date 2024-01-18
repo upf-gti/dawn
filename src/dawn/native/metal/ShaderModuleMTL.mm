@@ -270,6 +270,8 @@ ResultOrError<CacheResult<MslCompilation>> TranslateToMSL(
     req.tintOptions.array_length_from_uniform = std::move(arrayLengthFromUniform);
     req.tintOptions.pixel_local_options = std::move(pixelLocal);
     req.tintOptions.bindings = std::move(bindings);
+    req.tintOptions.disable_polyfill_integer_div_mod =
+        device->IsToggleEnabled(Toggle::DisablePolyfillsOnIntegerDivisonAndModulo);
 
     const CombinedLimits& limits = device->GetLimits();
     req.limits = LimitsForCompilationRequest::Create(limits.v1);
@@ -344,7 +346,7 @@ ResultOrError<CacheResult<MslCompilation>> TranslateToMSL(
 
             TRACE_EVENT0(r.platform.UnsafeGetValue(), General, "tint::msl::writer::Generate");
             auto result = tint::msl::writer::Generate(program, r.tintOptions);
-            DAWN_INVALID_IF(!result, "An error occurred while generating MSL:\n%s",
+            DAWN_INVALID_IF(result != tint::Success, "An error occurred while generating MSL:\n%s",
                             result.Failure().reason.str());
 
             // Metal uses Clang to compile the shader as C++14. Disable everything in the -Wall

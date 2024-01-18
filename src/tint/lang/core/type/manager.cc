@@ -174,22 +174,27 @@ const core::type::Array* Manager::array(const core::type::Type* elem_ty,
 
 const core::type::Array* Manager::runtime_array(const core::type::Type* elem_ty,
                                                 uint32_t stride /* = 0 */) {
+    uint32_t implicit_stride = tint::RoundUp(elem_ty->Align(), elem_ty->Size());
     if (stride == 0) {
-        stride = elem_ty->Align();
+        stride = implicit_stride;
     }
+    TINT_ASSERT(stride >= implicit_stride);
+
     return Get<core::type::Array>(
         /* element type */ elem_ty,
         /* element count */ Get<RuntimeArrayCount>(),
         /* array alignment */ elem_ty->Align(),
         /* array size */ stride,
         /* element stride */ stride,
-        /* implicit stride */ elem_ty->Align());
+        /* implicit stride */ implicit_stride);
 }
 
 const core::type::Pointer* Manager::ptr(core::AddressSpace address_space,
                                         const core::type::Type* subtype,
-                                        core::Access access /* = core::Access::kReadWrite */) {
-    return Get<core::type::Pointer>(address_space, subtype, access);
+                                        core::Access access /* = core::Access::kUndefined */) {
+    return Get<core::type::Pointer>(
+        address_space, subtype,
+        access == core::Access::kUndefined ? DefaultAccessFor(address_space) : access);
 }
 
 core::type::Struct* Manager::Struct(Symbol name, VectorRef<const StructMember*> members) {

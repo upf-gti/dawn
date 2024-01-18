@@ -39,8 +39,6 @@
 
 namespace dawn::native::d3d11 {
 
-class Fence;
-
 // Definition of backend types
 class Device final : public d3d::Device {
   public:
@@ -64,7 +62,7 @@ class Device final : public d3d::Device {
     void ReferenceUntilUnused(ComPtr<IUnknown> object);
     Ref<TextureBase> CreateD3DExternalTexture(const UnpackedPtr<TextureDescriptor>& descriptor,
                                               ComPtr<IUnknown> d3dTexture,
-                                              std::vector<Ref<d3d::Fence>> waitFences,
+                                              std::vector<FenceAndSignalValue> waitFences,
                                               bool isSwapChainTexture,
                                               bool isInitialized) override;
 
@@ -89,7 +87,7 @@ class Device final : public d3d::Device {
     bool IsResolveTextureBlitWithDrawSupported() const override;
     void SetLabelImpl() override;
 
-    ResultOrError<Ref<d3d::Fence>> CreateFence(
+    ResultOrError<FenceAndSignalValue> CreateFence(
         const d3d::ExternalImageDXGIFenceDescriptor* descriptor) override;
     ResultOrError<std::unique_ptr<d3d::ExternalImageDXGIImpl>> CreateExternalImageDXGIImplImpl(
         const ExternalImageDescriptor* descriptor) override;
@@ -100,6 +98,13 @@ class Device final : public d3d::Device {
         uint32_t width,
         uint32_t height,
         uint32_t implicitAttachmentIndex);
+
+    // Grab a staging buffer, the size of which is no less than 'size'.
+    // Note: We assume only 1 staging buffer is active, so the client should release it as soon as
+    // possbile once the buffer usage is done.
+    ResultOrError<Ref<BufferBase>> GetStagingBuffer(
+        const ScopedCommandRecordingContext* commandContext,
+        uint64_t size);
 
   private:
     using Base = d3d::Device;
@@ -157,6 +162,9 @@ class Device final : public d3d::Device {
 
     // TODO(dawn:1704): decide when to clear the cached implicit pixel local storage attachments.
     std::array<Ref<TextureViewBase>, kMaxPLSSlots> mImplicitPixelLocalStorageAttachmentTextureViews;
+
+    // The cached staging buffer.
+    Ref<BufferBase> mStagingBuffer;
 };
 
 }  // namespace dawn::native::d3d11

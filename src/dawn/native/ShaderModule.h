@@ -32,11 +32,11 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "dawn/common/Constants.h"
 #include "dawn/common/ContentLessObjectCacheable.h"
 #include "dawn/common/ityp_array.h"
@@ -68,7 +68,6 @@ class VertexPulling;
 
 namespace dawn::native {
 
-using WGSLExtensionSet = std::unordered_set<std::string>;
 struct EntryPointMetadata;
 
 // Base component type of an inter-stage variable
@@ -103,7 +102,7 @@ using PipelineConstantEntries = std::map<std::string, double>;
 
 // A map from name to EntryPointMetadata.
 using EntryPointMetadataTable =
-    std::unordered_map<std::string, std::unique_ptr<EntryPointMetadata>>;
+    absl::flat_hash_map<std::string, std::unique_ptr<EntryPointMetadata>>;
 
 // Source for a tint program
 class TintSource;
@@ -261,7 +260,7 @@ struct EntryPointMetadata {
         bool isInitialized;
     };
 
-    using OverridesMap = std::unordered_map<std::string, Override>;
+    using OverridesMap = absl::flat_hash_map<std::string, Override>;
 
     // Map identifier to override variable
     // Identifier is unique: either the variable name or the numeric ID if specified
@@ -269,12 +268,12 @@ struct EntryPointMetadata {
 
     // Override variables that are not initialized in shaders
     // They need value initialization from pipeline stage or it is a validation error
-    std::unordered_set<std::string> uninitializedOverrides;
+    absl::flat_hash_set<std::string> uninitializedOverrides;
 
     // Store constants with shader initialized values as well
     // This is used by metal backend to set values with default initializers that are not
     // overridden
-    std::unordered_set<std::string> initializedOverrides;
+    absl::flat_hash_set<std::string> initializedOverrides;
 
     // Reflection information about potential `pixel_local` variable use.
     bool usesPixelLocal = false;
@@ -285,6 +284,7 @@ struct EntryPointMetadata {
     bool usesInstanceIndex = false;
     bool usesNumWorkgroups = false;
     bool usesSampleMaskOutput = false;
+    bool usesSampleIndex = false;
     bool usesVertexIndex = false;
 };
 
@@ -350,7 +350,6 @@ class ShaderModuleBase : public ApiObjectBase,
     EntryPointMetadataTable mEntryPoints;
     PerStage<std::string> mDefaultEntryPointNames;
     PerStage<size_t> mEntryPointCounts;
-    WGSLExtensionSet mEnabledWGSLExtensions;
     std::unique_ptr<tint::Program> mTintProgram;
     std::unique_ptr<TintSource> mTintSource;  // Keep the tint::Source::File alive
 

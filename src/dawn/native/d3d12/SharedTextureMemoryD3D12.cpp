@@ -33,7 +33,6 @@
 #include "dawn/native/d3d/D3DError.h"
 #include "dawn/native/d3d/UtilsD3D.h"
 #include "dawn/native/d3d12/DeviceD3D12.h"
-#include "dawn/native/d3d12/SharedFenceD3D12.h"
 #include "dawn/native/d3d12/TextureD3D12.h"
 
 namespace dawn::native::d3d12 {
@@ -119,14 +118,12 @@ ResultOrError<Ref<TextureBase>> SharedTextureMemory::CreateTextureImpl(
     return Texture::CreateFromSharedTextureMemory(this, descriptor);
 }
 
-ResultOrError<Ref<SharedFenceBase>> SharedTextureMemory::CreateFenceImpl(
-    const SharedFenceDXGISharedHandleDescriptor* desc) {
-    return SharedFence::Create(ToBackend(GetDevice()), "Internal shared DXGI fence", desc);
-}
-
 MaybeError SharedTextureMemory::BeginAccessImpl(
     TextureBase* texture,
     const UnpackedPtr<BeginAccessDescriptor>& descriptor) {
+    // TODO(dawn/2276): support concurrent read access.
+    DAWN_INVALID_IF(descriptor->concurrentRead, "D3D12 backend doesn't support concurrent read.");
+
     DAWN_TRY(d3d::SharedTextureMemory::BeginAccessImpl(texture, descriptor));
     // Reset state to COMMON. BeginAccess contains a list of fences to wait on after
     // which the texture's usage will complete on the GPU.

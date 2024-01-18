@@ -118,6 +118,8 @@ D3D12_RESOURCE_FLAGS D3D12ResourceFlags(wgpu::TextureUsage usage, const Format& 
 
 D3D12_RESOURCE_DIMENSION D3D12TextureDimension(wgpu::TextureDimension dimension) {
     switch (dimension) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             return D3D12_RESOURCE_DIMENSION_TEXTURE1D;
         case wgpu::TextureDimension::e2D:
@@ -194,7 +196,7 @@ ResultOrError<Ref<Texture>> Texture::CreateExternalImage(
     Device* device,
     const UnpackedPtr<TextureDescriptor>& descriptor,
     ComPtr<IUnknown> d3dTexture,
-    std::vector<Ref<d3d::Fence>> waitFences,
+    std::vector<FenceAndSignalValue> waitFences,
     bool isSwapChainTexture,
     bool isInitialized) {
     Ref<Texture> dawnTexture = AcquireRef(new Texture(device, descriptor));
@@ -234,7 +236,7 @@ ResultOrError<Ref<Texture>> Texture::CreateFromSharedTextureMemory(
 }
 
 MaybeError Texture::InitializeAsExternalTexture(ComPtr<IUnknown> d3dTexture,
-                                                std::vector<Ref<d3d::Fence>> waitFences,
+                                                std::vector<FenceAndSignalValue> waitFences,
                                                 bool isSwapChainTexture) {
     ComPtr<ID3D12Resource> d3d12Texture;
     DAWN_TRY(CheckHRESULT(d3dTexture.As(&d3d12Texture), "texture is not a valid ID3D12Resource"));
@@ -426,12 +428,12 @@ MaybeError Texture::SynchronizeImportedTextureBeforeUse() {
     Device* device = ToBackend(GetDevice());
     ID3D12CommandQueue* commandQueue = ToBackend(device->GetQueue())->GetCommandQueue();
 
-    for (Ref<d3d::Fence>& fence : mWaitFences) {
-        DAWN_TRY(CheckHRESULT(commandQueue->Wait(static_cast<Fence*>(fence.Get())->GetD3D12Fence(),
-                                                 fence->GetFenceValue()),
+    for (const auto& fence : mWaitFences) {
+        DAWN_TRY(CheckHRESULT(commandQueue->Wait(ToBackend(fence.object)->GetD3DFence(),
+                                                 fence.signaledValue),
                               "D3D12 fence wait"););
         // Keep D3D12 fence alive since we'll clear the waitFences list below.
-        device->ReferenceUntilUnused(static_cast<Fence*>(fence.Get())->GetD3D12Fence());
+        device->ReferenceUntilUnused(ToBackend(fence.object)->GetD3DFence());
     }
     mWaitFences.clear();
 
@@ -710,6 +712,7 @@ D3D12_RENDER_TARGET_VIEW_DESC Texture::GetRTVDescriptor(const Format& format,
             rtvDesc.Texture3D.WSize = sliceCount;
             break;
         case wgpu::TextureDimension::e1D:
+        case wgpu::TextureDimension::Undefined:
             DAWN_UNREACHABLE();
             break;
     }

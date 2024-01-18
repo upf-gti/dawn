@@ -153,11 +153,11 @@ deps = {
 
   # Jinja2 and MarkupSafe for the code generator
   'third_party/jinja2': {
-    'url': '{chromium_git}/chromium/src/third_party/jinja2@515dd10de9bf63040045902a4a310d2ba25213a0',
+    'url': '{chromium_git}/chromium/src/third_party/jinja2@e2d024354e11cc6b041b0cff032d73f0c7e43a07',
     'condition': 'dawn_standalone',
   },
   'third_party/markupsafe': {
-    'url': '{chromium_git}/chromium/src/third_party/markupsafe@006709ba3ed87660a17bd4548c45663628f5ed85',
+    'url': '{chromium_git}/chromium/src/third_party/markupsafe@0bad08bb207bbfc1d6f3bbc82b9242b0c50e5794',
     'condition': 'dawn_standalone',
   },
 
@@ -167,22 +167,22 @@ deps = {
   },
 
   'third_party/vulkan_memory_allocator': {
-    'url': '{chromium_git}/external/github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator@e87036508bb156f9986ea959323de1869e328f58',
+    'url': '{chromium_git}/external/github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator@52dc220fb326e6ae132b7f262133b37b0dc334a3',
     'condition': 'dawn_standalone',
   },
 
   'third_party/angle': {
-    'url': '{chromium_git}/angle/angle@4b8573817f2a8e3358190aa01bc096318bc81eb0',
+    'url': '{chromium_git}/angle/angle@d093c3d3c22c90b9211789baa89fe9cf62911a02',
     'condition': 'dawn_standalone',
   },
 
   'third_party/swiftshader': {
-    'url': '{swiftshader_git}/SwiftShader@2fa7e9b99ae4e70ea5ae2cc9c8d3afb43391384f',
+    'url': '{swiftshader_git}/SwiftShader@328e794f0c8bddc81c834ccc89c9652902f643cb',
     'condition': 'dawn_standalone',
   },
 
   'third_party/vulkan-deps': {
-    'url': '{chromium_git}/vulkan-deps@222d9442542bac0e6c7d901c689eabfa9115ddb5',
+    'url': '{chromium_git}/vulkan-deps@483d7b1561b506656746f3399a753235187ad1a9',
     'condition': 'dawn_standalone',
   },
 
@@ -197,7 +197,7 @@ deps = {
   },
 
   'third_party/dxc': {
-    'url': '{chromium_git}/external/github.com/microsoft/DirectXShaderCompiler@a743e97f89f929d56b3d906b611f5fba7a12e441',
+    'url': '{chromium_git}/external/github.com/microsoft/DirectXShaderCompiler@414acd5b97c172d8f6bccb936d3220d731b2f306',
   },
 
   'third_party/dxheaders': {
@@ -216,7 +216,7 @@ deps = {
 
   # WebGPU CTS - not used directly by Dawn, only transitively by Chromium.
   'third_party/webgpu-cts': {
-    'url': '{chromium_git}/external/github.com/gpuweb/cts@f20c5f7b8f53904edaa98651d764e1b8305d7c14',
+    'url': '{chromium_git}/external/github.com/gpuweb/cts@f6d89c7267a638f77be43ba33754b6d3a1098f37',
     'condition': 'build_with_chromium',
   },
 
@@ -287,7 +287,7 @@ deps = {
   # Dependencies for PartitionAlloc.
   # Doc: https://docs.google.com/document/d/1wz45t0alQthsIU9P7_rQcfQyqnrBMXzrOjSzdQo-V-A
   'third_party/partition_alloc': {
-    'url': '{chromium_git}/chromium/src/base/allocator/partition_allocator.git@cb18695870869cf972b76cdd27d52f86c1752d0e',
+    'url': '{chromium_git}/chromium/src/base/allocator/partition_allocator.git@67fd2f86eef40b1357387e2b0fc1eaf3c67d6ed7',
     'condition': 'dawn_standalone',
   },
 }

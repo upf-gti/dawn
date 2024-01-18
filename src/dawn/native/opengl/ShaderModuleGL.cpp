@@ -265,6 +265,8 @@ ResultOrError<GLuint> ShaderModule::CompileShader(
     req.tintOptions.external_texture_options = BuildExternalTextureTransformBindings(layout);
     req.tintOptions.binding_remapper_options.binding_points = std::move(glBindings);
     req.tintOptions.texture_builtins_from_uniform = std::move(textureBuiltinsFromUniform);
+    req.tintOptions.disable_polyfill_integer_div_mod =
+        GetDevice()->IsToggleEnabled(Toggle::DisablePolyfillsOnIntegerDivisonAndModulo);
 
     // When textures are accessed without a sampler (e.g., textureLoad()),
     // GetSamplerTextureUses() will return this sentinel value.
@@ -383,7 +385,7 @@ ResultOrError<GLuint> ShaderModule::CompileShader(
             }
 
             auto result = tint::glsl::writer::Generate(program, r.tintOptions, remappedEntryPoint);
-            DAWN_INVALID_IF(!result, "An error occurred while generating GLSL:\n%s",
+            DAWN_INVALID_IF(result != tint::Success, "An error occurred while generating GLSL:\n%s",
                             result.Failure().reason.str());
 
             return GLSLCompilation{{std::move(result->glsl), result->needs_internal_uniform_buffer,

@@ -33,6 +33,8 @@
 #include "dawn/native/d3d/D3DError.h"
 #include "dawn/native/d3d/DeviceD3D.h"
 #include "dawn/native/d3d/Forward.h"
+#include "dawn/native/d3d/QueueD3D.h"
+#include "dawn/native/d3d/SharedFenceD3D.h"
 
 namespace dawn::native::d3d {
 
@@ -67,7 +69,9 @@ MaybeError SharedTextureMemory::BeginAccessImpl(
         }
     }
 
-    if (mDXGIKeyedMutex) {
+    // Acquire keyed mutex for the first access.
+    if (mDXGIKeyedMutex &&
+        (HasWriteAccess() || HasExclusiveReadAccess() || GetReadAccessCount() == 1)) {
         DAWN_TRY(CheckHRESULT(mDXGIKeyedMutex->AcquireSync(kDXGIKeyedMutexAcquireKey, INFINITE),
                               "Acquire keyed mutex"));
     }
@@ -82,18 +86,17 @@ ResultOrError<FenceAndSignalValue> SharedTextureMemory::EndAccessImpl(
                     "Required feature (%s) is missing.",
                     wgpu::FeatureName::SharedFenceDXGISharedHandle);
 
-    if (mDXGIKeyedMutex) {
+    // Release keyed mutex for the last access.
+    if (mDXGIKeyedMutex && !HasWriteAccess() && !HasExclusiveReadAccess() &&
+        GetReadAccessCount() == 0) {
         mDXGIKeyedMutex->ReleaseSync(kDXGIKeyedMutexAcquireKey);
     }
 
-    SharedFenceDXGISharedHandleDescriptor desc;
-    desc.handle = ToBackend(GetDevice())->GetFenceHandle();
-
-    Ref<SharedFenceBase> fence;
-    DAWN_TRY_ASSIGN(fence, CreateFenceImpl(&desc));
+    Ref<SharedFence> sharedFence;
+    DAWN_TRY_ASSIGN(sharedFence, ToBackend(GetDevice()->GetQueue())->GetOrCreateSharedFence());
 
     return FenceAndSignalValue{
-        std::move(fence),
+        std::move(sharedFence),
         static_cast<uint64_t>(texture->GetSharedTextureMemoryContents()->GetLastUsageSerial())};
 }
 

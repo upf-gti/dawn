@@ -580,8 +580,8 @@ ResultOrError<Ref<ComputePipelineBase>> GetOrCreateTextureToBufferPipeline(
 
     Ref<ComputePipelineBase> pipeline;
     DAWN_TRY_ASSIGN(pipeline, device->CreateComputePipeline(&computePipelineDescriptor));
-    store->blitTextureToBufferComputePipelines.insert(
-        {std::make_pair(format.format, viewDimension), pipeline});
+    store->blitTextureToBufferComputePipelines.emplace(std::make_pair(format.format, viewDimension),
+                                                       pipeline);
     return pipeline;
 }
 
@@ -599,6 +599,8 @@ MaybeError BlitTextureToBuffer(DeviceBase* device,
         } else {
             wgpu::TextureDimension dimension = src.texture->GetDimension();
             switch (dimension) {
+                case wgpu::TextureDimension::Undefined:
+                    DAWN_UNREACHABLE();
                 case wgpu::TextureDimension::e1D:
                     textureViewDimension = wgpu::TextureViewDimension::e1D;
                     break;

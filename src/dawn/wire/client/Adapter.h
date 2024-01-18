@@ -36,12 +36,13 @@
 #include "dawn/wire/client/LimitsAndFeatures.h"
 #include "dawn/wire/client/ObjectBase.h"
 #include "dawn/wire/client/RequestTracker.h"
+#include "partition_alloc/pointers/raw_ptr.h"
 
 namespace dawn::wire::client {
 
-class Adapter final : public ObjectBase {
+class Adapter final : public ObjectWithEventsBase {
   public:
-    using ObjectBase::ObjectBase;
+    using ObjectWithEventsBase::ObjectWithEventsBase;
     ~Adapter() override;
 
     void CancelCallbacksForDisconnect() override;
@@ -76,7 +77,8 @@ class Adapter final : public ObjectBase {
     struct RequestDeviceData {
         WGPURequestDeviceCallback callback = nullptr;
         ObjectId deviceObjectId;
-        void* userdata = nullptr;
+        // TODO(https://crbug.com/dawn/2345): Investigate `DanglingUntriaged` in dawn/wire.
+        raw_ptr<void, DanglingUntriaged> userdata = nullptr;
     };
     RequestTracker<RequestDeviceData> mRequestDeviceRequests;
 };

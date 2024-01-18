@@ -283,6 +283,8 @@ MaybeError ValidateTextureSize(const DeviceBase* device,
     const CombinedLimits& limits = device->GetLimits();
     Extent3D maxExtent;
     switch (descriptor->dimension) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             maxExtent = {limits.v1.maxTextureDimension1D, 1, 1};
             break;
@@ -301,6 +303,8 @@ MaybeError ValidateTextureSize(const DeviceBase* device,
         "Texture size (%s) exceeded maximum texture size (%s).", &descriptor->size, &maxExtent);
 
     switch (descriptor->dimension) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             DAWN_INVALID_IF(descriptor->mipLevelCount != 1,
                             "Texture mip level count (%u) is more than 1 when its dimension is %s.",
@@ -497,6 +501,8 @@ wgpu::TextureViewDimension ResolveDefaultCompatiblityTextureBindingViewDimension
     }
 
     switch (descriptor->dimension) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             return wgpu::TextureViewDimension::e1D;
         case wgpu::TextureDimension::e2D:
@@ -639,13 +645,16 @@ ResultOrError<TextureViewDescriptor> GetTextureViewDescriptorWithDefaults(
 
     TextureViewDescriptor desc = {};
     if (descriptor) {
-        desc = *descriptor;
+        desc = descriptor->WithTrivialFrontendDefaults();
     }
 
     // The default value for the view dimension depends on the texture's dimension with a
     // special case for 2DArray being chosen if texture is 2D but has more than one array layer.
     if (desc.dimension == wgpu::TextureViewDimension::Undefined) {
         switch (texture->GetDimension()) {
+            case wgpu::TextureDimension::Undefined:
+                DAWN_UNREACHABLE();
+
             case wgpu::TextureDimension::e1D:
                 desc.dimension = wgpu::TextureViewDimension::e1D;
                 break;
@@ -678,6 +687,7 @@ ResultOrError<TextureViewDescriptor> GetTextureViewDescriptorWithDefaults(
             desc.format = format.format;
         }
     }
+
     if (desc.arrayLayerCount == wgpu::kArrayLayerCountUndefined) {
         switch (desc.dimension) {
             case wgpu::TextureViewDimension::e1D:
@@ -949,6 +959,11 @@ void TextureBase::SetHasAccess(bool hasAccess) {
     mState.hasAccess = hasAccess;
 }
 
+bool TextureBase::HasAccess() const {
+    DAWN_ASSERT(!IsError());
+    return mState.hasAccess;
+}
+
 uint32_t TextureBase::GetSubresourceIndex(uint32_t mipLevel,
                                           uint32_t arraySlice,
                                           Aspect aspect) const {
@@ -1018,11 +1033,17 @@ bool TextureBase::IsMultisampledTexture() const {
     return mSampleCount > 1;
 }
 
+bool TextureBase::IsReadOnly() const {
+    return IsSubset(mUsage, kReadOnlyTextureUsages);
+}
+
 bool TextureBase::CoversFullSubresource(uint32_t mipLevel,
                                         Aspect aspect,
                                         const Extent3D& size) const {
     Extent3D levelSize = GetMipLevelSingleSubresourcePhysicalSize(mipLevel, aspect);
     switch (GetDimension()) {
+        case wgpu::TextureDimension::Undefined:
+            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             return size.width == levelSize.width;
         case wgpu::TextureDimension::e2D:
@@ -1097,6 +1118,10 @@ ResultOrError<Ref<TextureViewBase>> TextureBase::CreateView(
     return GetDevice()->CreateTextureView(this, descriptor);
 }
 
+TextureViewBase* TextureBase::CreateErrorView(const TextureViewDescriptor* descriptor) {
+    return TextureViewBase::MakeError(GetDevice(), descriptor ? descriptor->label : nullptr);
+}
+
 ApiObjectList* TextureBase::GetViewTrackingList() {
     return &mTextureViews;
 }
@@ -1107,9 +1132,13 @@ TextureViewBase* TextureBase::APICreateView(const TextureViewDescriptor* descrip
     Ref<TextureViewBase> result;
     if (device->ConsumedError(CreateView(descriptor), &result, "calling %s.CreateView(%s).", this,
                               descriptor)) {
-        return TextureViewBase::MakeError(device, descriptor ? descriptor->label : nullptr);
+        return CreateErrorView(descriptor);
     }
     return result.Detach();
+}
+
+TextureViewBase* TextureBase::APICreateErrorView(const TextureViewDescriptor* descriptor) {
+    return CreateErrorView(descriptor);
 }
 
 bool TextureBase::IsImplicitMSAARenderTextureViewSupported() const {

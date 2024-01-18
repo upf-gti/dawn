@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "dawn/native/CacheRequest.h"
 #include "dawn/native/PhysicalDevice.h"
 #include "dawn/native/Serializable.h"
@@ -147,9 +148,9 @@ class ShaderModule::ConcurrentTransformedShaderModuleCache {
 
     Device* mDevice;
     std::mutex mMutex;
-    std::unordered_map<TransformedShaderModuleCacheKey,
-                       Entry,
-                       TransformedShaderModuleCacheKeyHashFunc>
+    absl::flat_hash_map<TransformedShaderModuleCacheKey,
+                        Entry,
+                        TransformedShaderModuleCacheKeyHashFunc>
         mTransformedShaderModuleCache;
 };
 
@@ -335,6 +336,8 @@ ResultOrError<ShaderModule::ModuleAndSpirv> ShaderModule::GetHandleAndSpirv(
     req.tintOptions.polyfill_dot_4x8_packed =
         GetDevice()->IsToggleEnabled(Toggle::PolyFillPacked4x8DotProduct);
     req.use_tint_ir = GetDevice()->IsToggleEnabled(Toggle::UseTintIR);
+    req.tintOptions.disable_polyfill_integer_div_mod =
+        GetDevice()->IsToggleEnabled(Toggle::DisablePolyfillsOnIntegerDivisonAndModulo);
 
     // Set subgroup uniform control flow flag for subgroup experiment, if device has
     // Chromium-experimental-subgroup-uniform-control-flow feature. (dawn:464)
@@ -415,14 +418,16 @@ ResultOrError<ShaderModule::ModuleAndSpirv> ShaderModule::GetHandleAndSpirv(
             if (r.use_tint_ir) {
                 // Convert the AST program to an IR module.
                 auto ir = tint::wgsl::reader::ProgramToLoweredIR(program);
-                DAWN_INVALID_IF(!ir, "An error occurred while generating Tint IR\n%s",
+                DAWN_INVALID_IF(ir != tint::Success,
+                                "An error occurred while generating Tint IR\n%s",
                                 ir.Failure().reason.str());
 
                 tintResult = tint::spirv::writer::Generate(ir.Get(), r.tintOptions);
             } else {
                 tintResult = tint::spirv::writer::Generate(program, r.tintOptions);
             }
-            DAWN_INVALID_IF(!tintResult, "An error occurred while generating SPIR-V\n%s",
+            DAWN_INVALID_IF(tintResult != tint::Success,
+                            "An error occurred while generating SPIR-V\n%s",
                             tintResult.Failure().reason.str());
 
             CompiledSpirv result;

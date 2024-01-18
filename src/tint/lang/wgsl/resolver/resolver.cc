@@ -44,6 +44,7 @@
 #include "src/tint/lang/core/type/depth_multisampled_texture.h"
 #include "src/tint/lang/core/type/depth_texture.h"
 #include "src/tint/lang/core/type/external_texture.h"
+#include "src/tint/lang/core/type/memory_view.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/pointer.h"
 #include "src/tint/lang/core/type/reference.h"
@@ -127,7 +128,7 @@ Resolver::Resolver(ProgramBuilder* builder, const wgsl::AllowedFeatures& allowed
     : b(*builder),
       diagnostics_(builder->Diagnostics()),
       const_eval_(builder->constants, diagnostics_),
-      intrinsic_table_{builder->Types(), builder->Symbols(), builder->Diagnostics()},
+      intrinsic_table_{builder->Types(), builder->Symbols()},
       sem_(builder),
       validator_(builder,
                  sem_,
@@ -608,7 +609,7 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                 attribute,  //
                 [&](const ast::BindingAttribute* attr) {
                     auto value = BindingAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     binding = value.Get();
@@ -616,7 +617,7 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                 },
                 [&](const ast::GroupAttribute* attr) {
                     auto value = GroupAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     group = value.Get();
@@ -627,7 +628,7 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                         return kInvalid;
                     }
                     auto value = LocationAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     global->Attributes().location = value.Get();
@@ -638,7 +639,7 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                         return kInvalid;
                     }
                     auto value = IndexAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     global->Attributes().index = value.Get();
@@ -649,7 +650,7 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                         return kInvalid;
                     }
                     auto value = ColorAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     global->Attributes().color = value.Get();
@@ -659,13 +660,13 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                     if (!has_io_address_space) {
                         return kInvalid;
                     }
-                    return BuiltinAttribute(attr) ? kSuccess : kErrored;
+                    return BuiltinAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](const ast::InterpolateAttribute* attr) {
                     if (!has_io_address_space) {
                         return kInvalid;
                     }
-                    return InterpolateAttribute(attr) ? kSuccess : kErrored;
+                    return InterpolateAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](const ast::InvariantAttribute* attr) {
                     if (!has_io_address_space) {
@@ -732,7 +733,7 @@ sem::Parameter* Resolver::Parameter(const ast::Parameter* param,
                 attribute,  //
                 [&](const ast::LocationAttribute* attr) {
                     auto value = LocationAttribute(attr);
-                    if (TINT_UNLIKELY(!value)) {
+                    if (TINT_UNLIKELY(value != Success)) {
                         return false;
                     }
                     sem->Attributes().location = value.Get();
@@ -740,28 +741,30 @@ sem::Parameter* Resolver::Parameter(const ast::Parameter* param,
                 },
                 [&](const ast::ColorAttribute* attr) {
                     auto value = ColorAttribute(attr);
-                    if (TINT_UNLIKELY(!value)) {
+                    if (TINT_UNLIKELY(value != Success)) {
                         return false;
                     }
                     sem->Attributes().color = value.Get();
                     return true;
                 },
-                [&](const ast::BuiltinAttribute* attr) -> bool { return BuiltinAttribute(attr); },
+                [&](const ast::BuiltinAttribute* attr) {
+                    return BuiltinAttribute(attr) == Success;
+                },
                 [&](const ast::InvariantAttribute* attr) -> bool {
                     return InvariantAttribute(attr);
                 },
-                [&](const ast::InterpolateAttribute* attr) -> bool {
-                    return InterpolateAttribute(attr);
+                [&](const ast::InterpolateAttribute* attr) {
+                    return InterpolateAttribute(attr) == Success;
                 },
                 [&](const ast::InternalAttribute* attr) -> bool { return InternalAttribute(attr); },
-                [&](const ast::GroupAttribute* attr) -> bool {
+                [&](const ast::GroupAttribute* attr) {
                     if (validator_.IsValidationEnabled(
                             param->attributes, ast::DisabledValidation::kEntryPointParameter)) {
                         ErrorInvalidAttribute(attribute, "function parameters");
                         return false;
                     }
                     auto value = GroupAttribute(attr);
-                    if (TINT_UNLIKELY(!value)) {
+                    if (TINT_UNLIKELY(value != Success)) {
                         return false;
                     }
                     group = value.Get();
@@ -774,7 +777,7 @@ sem::Parameter* Resolver::Parameter(const ast::Parameter* param,
                         return false;
                     }
                     auto value = BindingAttribute(attr);
-                    if (TINT_UNLIKELY(!value)) {
+                    if (TINT_UNLIKELY(value != Success)) {
                         return false;
                     }
                     binding = value.Get();
@@ -987,7 +990,7 @@ sem::Function* Resolver::Function(const ast::Function* decl) {
             [&](const ast::MustUseAttribute* attr) { return MustUseAttribute(attr); },
             [&](const ast::WorkgroupAttribute* attr) {
                 auto value = WorkgroupAttribute(attr);
-                if (!value) {
+                if (value != Success) {
                     return false;
                 }
                 func->SetWorkgroupSize(value.Get());
@@ -1071,7 +1074,7 @@ sem::Function* Resolver::Function(const ast::Function* decl) {
                 attribute,  //
                 [&](const ast::LocationAttribute* attr) {
                     auto value = LocationAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     func->SetReturnLocation(value.Get());
@@ -1079,20 +1082,20 @@ sem::Function* Resolver::Function(const ast::Function* decl) {
                 },
                 [&](const ast::IndexAttribute* attr) {
                     auto value = IndexAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return kErrored;
                     }
                     func->SetReturnIndex(value.Get());
                     return kSuccess;
                 },
                 [&](const ast::BuiltinAttribute* attr) {
-                    return BuiltinAttribute(attr) ? kSuccess : kErrored;
+                    return BuiltinAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](const ast::InternalAttribute* attr) {
                     return InternalAttribute(attr) ? kSuccess : kErrored;
                 },
                 [&](const ast::InterpolateAttribute* attr) {
-                    return InterpolateAttribute(attr) ? kSuccess : kErrored;
+                    return InterpolateAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](const ast::InvariantAttribute* attr) {
                     return InvariantAttribute(attr) ? kSuccess : kErrored;
@@ -1101,13 +1104,13 @@ sem::Function* Resolver::Function(const ast::Function* decl) {
                     if (!permissive) {
                         return kInvalid;
                     }
-                    return BindingAttribute(attr) ? kSuccess : kErrored;
+                    return BindingAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](const ast::GroupAttribute* attr) {
                     if (!permissive) {
                         return kInvalid;
                     }
-                    return GroupAttribute(attr) ? kSuccess : kErrored;
+                    return GroupAttribute(attr) == Success ? kSuccess : kErrored;
                 },
                 [&](Default) { return kInvalid; });
 
@@ -1889,7 +1892,7 @@ const sem::ValueExpression* Resolver::Materialize(
         }
 
         auto val = const_eval_.Convert(concrete_ty, expr_val, decl->source);
-        if (!val) {
+        if (val != Success) {
             // Convert() has already failed and raised an diagnostic error.
             return nullptr;
         }
@@ -1941,7 +1944,7 @@ bool Resolver::Convert(const core::constant::Value*& c,
                        const core::type::Type* target_ty,
                        const Source& source) {
     auto r = const_eval_.Convert(target_ty, c, source);
-    if (!r) {
+    if (r != Success) {
         return false;
     }
     c = r.Get();
@@ -1977,17 +1980,30 @@ sem::ValueExpression* Resolver::IndexAccessor(const ast::IndexAccessorExpression
     if (!obj) {
         return nullptr;
     }
-    auto* obj_raw_ty = obj->Type();
-    auto* obj_ty = obj_raw_ty->UnwrapRef();
+    auto* object_ty = obj->Type();
+    auto* const memory_view = object_ty->As<core::type::MemoryView>();
+    const core::type::Type* storage_ty = object_ty->UnwrapRef();
+    if (memory_view) {
+        if (memory_view->Is<core::type::Pointer>() &&
+            !allowed_features_.features.count(wgsl::LanguageFeature::kPointerCompositeAccess)) {
+            AddError(
+                "pointer composite access requires the pointer_composite_access language feature, "
+                "which is not allowed in the current environment",
+                expr->source);
+            return nullptr;
+        }
+        storage_ty = memory_view->StoreType();
+    }
+
     auto* ty = Switch(
-        obj_ty,  //
+        storage_ty,  //
         [&](const sem::Array* arr) { return arr->ElemType(); },
         [&](const core::type::Vector* vec) { return vec->type(); },
         [&](const core::type::Matrix* mat) {
             return b.create<core::type::Vector>(mat->type(), mat->rows());
         },
         [&](Default) {
-            AddError("cannot index type '" + sem_.TypeNameOf(obj_ty) + "'", expr->source);
+            AddError("cannot index type '" + sem_.TypeNameOf(storage_ty) + "'", expr->source);
             return nullptr;
         });
     if (ty == nullptr) {
@@ -2001,9 +2017,10 @@ sem::ValueExpression* Resolver::IndexAccessor(const ast::IndexAccessorExpression
         return nullptr;
     }
 
-    // If we're extracting from a reference, we return a reference.
-    if (auto* ref = obj_raw_ty->As<core::type::Reference>()) {
-        ty = b.create<core::type::Reference>(ref->AddressSpace(), ty, ref->Access());
+    // If we're extracting from a memory view, we return a reference.
+    if (memory_view) {
+        ty =
+            b.create<core::type::Reference>(memory_view->AddressSpace(), ty, memory_view->Access());
     }
 
     const core::constant::Value* val = nullptr;
@@ -2014,7 +2031,7 @@ sem::ValueExpression* Resolver::IndexAccessor(const ast::IndexAccessorExpression
         if (auto* idx_val = idx->ConstantValue()) {
             auto res = const_eval_.Index(obj->ConstantValue(), obj->Type(), idx_val,
                                          idx->Declaration()->source);
-            if (!res) {
+            if (res != Success) {
                 return nullptr;
             }
             val = res.Get();
@@ -2048,11 +2065,11 @@ sem::ValueExpression* Resolver::Bitcast(const ast::BitcastExpression* expr) {
 
     const core::constant::Value* value = nullptr;
     if (stage == core::EvaluationStage::kConstant) {
-        if (auto r = const_eval_.Bitcast(ty, inner->ConstantValue(), expr->source)) {
-            value = r.Get();
-        } else {
+        auto r = const_eval_.Bitcast(ty, inner->ConstantValue(), expr->source);
+        if (r != Success) {
             return nullptr;
         }
+        value = r.Get();
     }
 
     auto* sem = b.create<sem::ValueExpression>(expr, ty, stage, current_statement_,
@@ -2096,9 +2113,10 @@ sem::Call* Resolver::Call(const ast::CallExpression* expr) {
     // sem::ValueConversion call for a CtorConvIntrinsic with an optional template argument type.
     auto ctor_or_conv = [&](CtorConvIntrinsic ty,
                             const core::type::Type* template_arg) -> sem::Call* {
-        auto arg_tys = tint::Transform(args, [](auto* arg) { return arg->Type(); });
-        auto match = intrinsic_table_.Lookup(ty, template_arg, arg_tys, args_stage, expr->source);
-        if (!match) {
+        auto arg_tys = tint::Transform(args, [](auto* arg) { return arg->Type()->UnwrapRef(); });
+        auto match = intrinsic_table_.Lookup(ty, template_arg, arg_tys, args_stage);
+        if (match != Success) {
+            AddError(match.Failure(), expr->source);
             return nullptr;
         }
 
@@ -2137,16 +2155,16 @@ sem::Call* Resolver::Call(const ast::CallExpression* expr) {
         }
         if (stage == core::EvaluationStage::kConstant) {
             auto const_args = ConvertArguments(args, target_sem);
-            if (!const_args) {
+            if (const_args != Success) {
                 return nullptr;
             }
             auto const_eval_fn = match->const_eval_fn;
-            if (auto r = (const_eval_.*const_eval_fn)(target_sem->ReturnType(), const_args.Get(),
-                                                      expr->source)) {
-                value = r.Get();
-            } else {
+            auto r = (const_eval_.*const_eval_fn)(target_sem->ReturnType(), const_args.Get(),
+                                                  expr->source);
+            if (r != Success) {
                 return nullptr;
             }
+            value = r.Get();
         }
         return b.create<sem::Call>(expr, target_sem, stage, std::move(args), current_statement_,
                                    value, has_side_effects);
@@ -2163,14 +2181,14 @@ sem::Call* Resolver::Call(const ast::CallExpression* expr) {
         }
         if (stage == core::EvaluationStage::kConstant) {
             auto const_args = ConvertArguments(args, call_target);
-            if (!const_args) {
+            if (const_args != Success) {
                 return nullptr;
             }
-            if (auto r = const_eval_.ArrayOrStructCtor(ty, std::move(const_args.Get()))) {
-                value = r.Get();
-            } else {
+            auto r = const_eval_.ArrayOrStructCtor(ty, std::move(const_args.Get()));
+            if (r != Success) {
                 return nullptr;
             }
+            value = r.Get();
             if (!value) {
                 // Constant evaluation failed.
                 // Can happen for expressions that will fail validation (later).
@@ -2368,9 +2386,10 @@ sem::Call* Resolver::BuiltinCall(const ast::CallExpression* expr,
         arg_stage = core::EarliestStage(arg_stage, arg->Stage());
     }
 
-    auto arg_tys = tint::Transform(args, [](auto* arg) { return arg->Type(); });
-    auto overload = intrinsic_table_.Lookup(fn, arg_tys, arg_stage, expr->source);
-    if (!overload) {
+    auto arg_tys = tint::Transform(args, [](auto* arg) { return arg->Type()->UnwrapRef(); });
+    auto overload = intrinsic_table_.Lookup(fn, arg_tys, arg_stage);
+    if (overload != Success) {
+        AddError(overload.Failure(), expr->source);
         return nullptr;
     }
 
@@ -2422,16 +2441,15 @@ sem::Call* Resolver::BuiltinCall(const ast::CallExpression* expr,
     }
     if (stage == core::EvaluationStage::kConstant) {
         auto const_args = ConvertArguments(args, target);
-        if (!const_args) {
+        if (const_args != Success) {
             return nullptr;
         }
         auto const_eval_fn = overload->const_eval_fn;
-        if (auto r = (const_eval_.*const_eval_fn)(target->ReturnType(), const_args.Get(),
-                                                  expr->source)) {
-            value = r.Get();
-        } else {
+        auto r = (const_eval_.*const_eval_fn)(target->ReturnType(), const_args.Get(), expr->source);
+        if (r != Success) {
             return nullptr;
         }
+        value = r.Get();
     }
 
     bool has_side_effects =
@@ -3395,7 +3413,20 @@ sem::ValueExpression* Resolver::MemberAccessor(const ast::MemberAccessorExpressi
     }
 
     auto* object_ty = object->Type();
-    auto* storage_ty = object_ty->UnwrapRef();
+
+    auto* const memory_view = object_ty->As<core::type::MemoryView>();
+    const core::type::Type* storage_ty = object_ty->UnwrapRef();
+    if (memory_view) {
+        if (memory_view->Is<core::type::Pointer>() &&
+            !allowed_features_.features.count(wgsl::LanguageFeature::kPointerCompositeAccess)) {
+            AddError(
+                "pointer composite access requires the pointer_composite_access language feature, "
+                "which is not allowed in the current environment",
+                expr->source);
+            return nullptr;
+        }
+        storage_ty = memory_view->StoreType();
+    }
 
     auto* root_ident = object->RootIdentifier();
 
@@ -3426,9 +3457,10 @@ sem::ValueExpression* Resolver::MemberAccessor(const ast::MemberAccessorExpressi
 
             ty = member->Type();
 
-            // If we're extracting from a reference, we return a reference.
-            if (auto* ref = object_ty->As<core::type::Reference>()) {
-                ty = b.create<core::type::Reference>(ref->AddressSpace(), ty, ref->Access());
+            // If we're extracting from a memory view, we return a reference.
+            if (memory_view) {
+                ty = b.create<core::type::Reference>(memory_view->AddressSpace(), ty,
+                                                     memory_view->Access());
             }
 
             const core::constant::Value* val = nullptr;
@@ -3494,9 +3526,10 @@ sem::ValueExpression* Resolver::MemberAccessor(const ast::MemberAccessorExpressi
             if (size == 1) {
                 // A single element swizzle is just the type of the vector.
                 ty = vec->type();
-                // If we're extracting from a reference, we return a reference.
-                if (auto* ref = object_ty->As<core::type::Reference>()) {
-                    ty = b.create<core::type::Reference>(ref->AddressSpace(), ty, ref->Access());
+                // If we're extracting from a memory view, we return a reference.
+                if (memory_view) {
+                    ty = b.create<core::type::Reference>(memory_view->AddressSpace(), ty,
+                                                         memory_view->Access());
                 }
             } else {
                 // The vector will have a number of components equal to the length of
@@ -3509,7 +3542,7 @@ sem::ValueExpression* Resolver::MemberAccessor(const ast::MemberAccessorExpressi
             const core::constant::Value* val = nullptr;
             if (auto* obj_val = object->ConstantValue()) {
                 auto res = const_eval_.Swizzle(ty, obj_val, swizzle);
-                if (!res) {
+                if (res != Success) {
                     return nullptr;
                 }
                 val = res.Get();
@@ -3544,9 +3577,10 @@ sem::ValueExpression* Resolver::Binary(const ast::BinaryExpression* expr) {
     }
 
     auto stage = core::EarliestStage(lhs->Stage(), rhs->Stage());
-    auto overload =
-        intrinsic_table_.Lookup(expr->op, lhs->Type(), rhs->Type(), stage, expr->source, false);
-    if (!overload) {
+    auto overload = intrinsic_table_.Lookup(expr->op, lhs->Type()->UnwrapRef(),
+                                            rhs->Type()->UnwrapRef(), stage, false);
+    if (overload != Success) {
+        AddError(overload.Failure(), expr->source);
         return nullptr;
     }
 
@@ -3592,11 +3626,11 @@ sem::ValueExpression* Resolver::Binary(const ast::BinaryExpression* expr) {
             if (!Convert(const_args[1], rhs_ty, rhs->Declaration()->source)) {
                 return nullptr;
             }
-            if (auto r = (const_eval_.*const_eval_fn)(res_ty, const_args, expr->source)) {
-                value = r.Get();
-            } else {
+            auto r = (const_eval_.*const_eval_fn)(res_ty, const_args, expr->source);
+            if (r != Success) {
                 return nullptr;
             }
+            value = r.Get();
         } else {
             // The arguments have constant values, but the operator cannot be const-evaluated.
             // This can only be evaluated at runtime.
@@ -3666,8 +3700,9 @@ sem::ValueExpression* Resolver::UnaryOp(const ast::UnaryOpExpression* unary) {
 
         default: {
             stage = expr->Stage();
-            auto overload = intrinsic_table_.Lookup(unary->op, expr_ty, stage, unary->source);
-            if (!overload) {
+            auto overload = intrinsic_table_.Lookup(unary->op, expr_ty->UnwrapRef(), stage);
+            if (overload != Success) {
+                AddError(overload.Failure(), unary->source);
                 return nullptr;
             }
             ty = overload->return_type;
@@ -3688,12 +3723,12 @@ sem::ValueExpression* Resolver::UnaryOp(const ast::UnaryOpExpression* unary) {
             stage = expr->Stage();
             if (stage == core::EvaluationStage::kConstant) {
                 if (auto const_eval_fn = overload->const_eval_fn) {
-                    if (auto r = (const_eval_.*const_eval_fn)(ty, Vector{expr->ConstantValue()},
-                                                              expr->Declaration()->source)) {
-                        value = r.Get();
-                    } else {
+                    auto r = (const_eval_.*const_eval_fn)(ty, Vector{expr->ConstantValue()},
+                                                          expr->Declaration()->source);
+                    if (r != Success) {
                         return nullptr;
                     }
+                    value = r.Get();
                 } else {
                     stage = core::EvaluationStage::kRuntime;
                 }
@@ -4375,7 +4410,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                 },
                 [&](const ast::LocationAttribute* attr) {
                     auto value = LocationAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return false;
                     }
                     attributes.location = value.Get();
@@ -4383,7 +4418,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                 },
                 [&](const ast::IndexAttribute* attr) {
                     auto value = IndexAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return false;
                     }
                     attributes.index = value.Get();
@@ -4391,7 +4426,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                 },
                 [&](const ast::ColorAttribute* attr) {
                     auto value = ColorAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return false;
                     }
                     attributes.color = value.Get();
@@ -4399,7 +4434,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                 },
                 [&](const ast::BuiltinAttribute* attr) {
                     auto value = BuiltinAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return false;
                     }
                     attributes.builtin = value.Get();
@@ -4407,7 +4442,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                 },
                 [&](const ast::InterpolateAttribute* attr) {
                     auto value = InterpolateAttribute(attr);
-                    if (!value) {
+                    if (value != Success) {
                         return false;
                     }
                     attributes.interpolation = value.Get();
@@ -4749,10 +4784,10 @@ sem::Statement* Resolver::CompoundAssignmentStatement(
 
         auto stage = core::EarliestStage(lhs->Stage(), rhs->Stage());
 
-        auto overload =
-            intrinsic_table_.Lookup(stmt->op, lhs->Type()->UnwrapRef(), rhs->Type()->UnwrapRef(),
-                                    stage, stmt->source, true);
-        if (!overload) {
+        auto overload = intrinsic_table_.Lookup(stmt->op, lhs->Type()->UnwrapRef(),
+                                                rhs->Type()->UnwrapRef(), stage, true);
+        if (overload != Success) {
+            AddError(overload.Failure(), stmt->source);
             return false;
         }
 

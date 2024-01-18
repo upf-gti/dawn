@@ -55,17 +55,16 @@ class Device : public DeviceBase {
     const PlatformFunctions* GetFunctions() const;
     ComPtr<IDXGIFactory4> GetFactory() const;
 
-    HANDLE GetFenceHandle() const;
-
     std::unique_ptr<ExternalImageDXGIImpl> CreateExternalImageDXGIImpl(
         const ExternalImageDescriptor* descriptor);
 
-    virtual ResultOrError<Ref<Fence>> CreateFence(
+    virtual ResultOrError<FenceAndSignalValue> CreateFence(
         const ExternalImageDXGIFenceDescriptor* descriptor) = 0;
+
     virtual Ref<TextureBase> CreateD3DExternalTexture(
         const UnpackedPtr<TextureDescriptor>& descriptor,
         ComPtr<IUnknown> d3dTexture,
-        std::vector<Ref<Fence>> waitFences,
+        std::vector<FenceAndSignalValue> waitFences,
         bool isSwapChainTexture,
         bool isInitialized) = 0;
 
@@ -74,8 +73,6 @@ class Device : public DeviceBase {
 
     virtual ResultOrError<std::unique_ptr<ExternalImageDXGIImpl>> CreateExternalImageDXGIImplImpl(
         const ExternalImageDescriptor* descriptor) = 0;
-
-    HANDLE mFenceHandle = nullptr;
 
   private:
     // List of external image resources opened using this device.

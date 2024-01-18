@@ -152,6 +152,8 @@ SanitizedResult Sanitize(const Program& in,
         data.Add<ast::transform::SingleEntryPoint::Config>(entry_point);
     }
 
+    data.Add<ast::transform::AddBlockAttribute::Config>(true);
+
     manager.Add<ast::transform::PreservePadding>();  // Must come before DirectVariableAccess
 
     manager.Add<ast::transform::Unshadow>();  // Must come before DirectVariableAccess
@@ -182,12 +184,13 @@ SanitizedResult Sanitize(const Program& in,
         polyfills.first_leading_bit = true;
         polyfills.first_trailing_bit = true;
         polyfills.insert_bits = ast::transform::BuiltinPolyfill::Level::kClampParameters;
-        polyfills.int_div_mod = true;
+        polyfills.int_div_mod = !options.disable_polyfill_integer_div_mod;
         polyfills.saturate = true;
         polyfills.texture_sample_base_clamp_to_edge_2d_f32 = true;
         polyfills.workgroup_uniform_load = true;
         polyfills.dot_4x8_packed = true;
         polyfills.pack_unpack_4x8 = true;
+        polyfills.pack_4xu8_clamp = true;
         data.Add<ast::transform::BuiltinPolyfill::Config>(polyfills);
         manager.Add<ast::transform::BuiltinPolyfill>();  // Must come before DirectVariableAccess
     }
@@ -263,7 +266,6 @@ bool ASTPrinter::Generate() {
             "GLSL", builder_.AST(), diagnostics_,
             Vector{
                 wgsl::Extension::kChromiumDisableUniformityAnalysis,
-                wgsl::Extension::kChromiumExperimentalFullPtrParameters,
                 wgsl::Extension::kChromiumInternalDualSourceBlending,
                 wgsl::Extension::kChromiumExperimentalPushConstant,
                 wgsl::Extension::kF16,
@@ -1896,9 +1898,7 @@ void ASTPrinter::EmitGlobalVariable(const ast::Variable* global) {
                     EmitIOVariable(sem);
                     return;
                 case core::AddressSpace::kPushConstant:
-                    diagnostics_.add_error(
-                        diag::System::Writer,
-                        "unhandled address space " + tint::ToString(sem->AddressSpace()));
+                    EmitPushConstant(sem);
                     return;
                 default: {
                     TINT_ICE() << "unhandled address space " << sem->AddressSpace();
@@ -2088,6 +2088,17 @@ void ASTPrinter::EmitIOVariable(const sem::GlobalVariable* var) {
         out << " = ";
         EmitExpression(out, initializer);
     }
+    out << ";";
+}
+
+void ASTPrinter::EmitPushConstant(const sem::GlobalVariable* var) {
+    auto* decl = var->Declaration();
+
+    auto out = Line();
+
+    auto name = decl->name->symbol.Name();
+    auto* type = var->Type()->UnwrapRef();
+    EmitTypeAndName(out, type, var->AddressSpace(), var->Access(), name);
     out << ";";
 }
 
@@ -2641,6 +2652,7 @@ void ASTPrinter::EmitType(StringStream& out,
             break;
         }
         case core::AddressSpace::kUniform:
+        case core::AddressSpace::kPushConstant:
         case core::AddressSpace::kHandle: {
             out << "uniform ";
             break;

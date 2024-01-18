@@ -729,6 +729,7 @@ ResultOrError<std::unique_ptr<EntryPointMetadata>> ReflectEntryPointUsingTint(
             totalInterStageShaderComponents += 1;
         }
         metadata->usesSampleMaskOutput = entryPoint.output_sample_mask_used;
+        metadata->usesSampleIndex = entryPoint.sample_index_used;
         if (entryPoint.sample_index_used) {
             totalInterStageShaderComponents += 1;
         }
@@ -911,8 +912,7 @@ ResultOrError<std::unique_ptr<EntryPointMetadata>> ReflectEntryPointUsingTint(
 MaybeError ReflectShaderUsingTint(const DeviceBase* device,
                                   const tint::Program* program,
                                   OwnedCompilationMessages* compilationMessages,
-                                  EntryPointMetadataTable* entryPointMetadataTable,
-                                  WGSLExtensionSet* enabledWGSLExtensions) {
+                                  EntryPointMetadataTable* entryPointMetadataTable) {
     DAWN_ASSERT(program->IsValid());
 
     tint::inspector::Inspector inspector(*program);
@@ -927,8 +927,8 @@ MaybeError ReflectShaderUsingTint(const DeviceBase* device,
                                 ReflectEntryPointUsingTint(device, &inspector, entryPoint),
                                 "processing entry point \"%s\".", entryPoint.name);
 
-        DAWN_ASSERT(entryPointMetadataTable->count(entryPoint.name) == 0);
-        (*entryPointMetadataTable)[entryPoint.name] = std::move(metadata);
+        DAWN_ASSERT(!entryPointMetadataTable->contains(entryPoint.name));
+        entryPointMetadataTable->emplace(entryPoint.name, std::move(metadata));
     }
     return {};
 }
@@ -1267,7 +1267,7 @@ ObjectType ShaderModuleBase::GetType() const {
 }
 
 bool ShaderModuleBase::HasEntryPoint(const std::string& entryPoint) const {
-    return mEntryPoints.count(entryPoint) > 0;
+    return mEntryPoints.contains(entryPoint);
 }
 
 ShaderModuleEntryPoint ShaderModuleBase::ReifyEntryPointName(const char* entryPointName,
@@ -1358,7 +1358,7 @@ MaybeError ShaderModuleBase::InitializeBase(ShaderModuleParseResult* parseResult
     mTintSource = std::move(parseResult->tintSource);
 
     DAWN_TRY(ReflectShaderUsingTint(GetDevice(), mTintProgram.get(), compilationMessages,
-                                    &mEntryPoints, &mEnabledWGSLExtensions));
+                                    &mEntryPoints));
 
     for (auto stage : IterateStages(kAllStages)) {
         mEntryPointCounts[stage] = 0;

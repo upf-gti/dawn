@@ -184,11 +184,12 @@ SanitizedResult Sanitize(const Program& in, const Options& options) {
         polyfills.first_leading_bit = true;
         polyfills.first_trailing_bit = true;
         polyfills.insert_bits = ast::transform::BuiltinPolyfill::Level::kClampParameters;
-        polyfills.int_div_mod = true;
+        polyfills.int_div_mod = !options.disable_polyfill_integer_div_mod;
         polyfills.sign_int = true;
         polyfills.texture_sample_base_clamp_to_edge_2d_f32 = true;
         polyfills.workgroup_uniform_load = true;
         polyfills.pack_unpack_4x8 = true;
+        polyfills.pack_4xu8_clamp = true;
         data.Add<ast::transform::BuiltinPolyfill::Config>(polyfills);
         manager.Add<ast::transform::BuiltinPolyfill>();
     }
@@ -276,7 +277,6 @@ bool ASTPrinter::Generate() {
             "MSL", builder_.AST(), diagnostics_,
             Vector{
                 wgsl::Extension::kChromiumDisableUniformityAnalysis,
-                wgsl::Extension::kChromiumExperimentalFullPtrParameters,
                 wgsl::Extension::kChromiumExperimentalPixelLocal,
                 wgsl::Extension::kChromiumExperimentalSubgroups,
                 wgsl::Extension::kChromiumExperimentalFramebufferFetch,
@@ -3034,8 +3034,28 @@ bool ASTPrinter::EmitLet(const ast::Let* let) {
 void ASTPrinter::EmitLoopPreserver() {
     IncrementIndent();
     // This statement prevents the MSL compiler from erasing a loop during
-    // optimimzations.
+    // optimizations.  In the AIR dialiect of LLVM IR, WGSL loops should compile
+    // to a loop that contains an 'asm' call with a 'sideeffect' annotation.
+    //
+    // For example, compile a WGSL file with a trivial while(1) loop to 'a.metal',
+    // then compile that to AIR (LLVM IR dialect):
+    //
+    //    xcrun metal a.metal -S -o -
+    //
+    // The loop in the AIR should look something like this:
+    //
+    //    1: ...
+    //      br label %2
+    //
+    //    2:                                      ; preds = %1, %2
+    //      tail call void asm sideeffect "", ""() #1, !srcloc !27
+    //      br label %2, !llvm.loop !28
+    //
+    // It is important that the 'sideeffect' annotation exist. That tells the
+    // optimizer that the instruction has side effects invisible to the
+    // optimizer, and therefore the loop should not be eliminated.
     Line() << R"(__asm__("");)";
+
     DecrementIndent();
 }
 

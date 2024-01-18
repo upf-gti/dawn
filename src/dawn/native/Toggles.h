@@ -30,9 +30,9 @@
 
 #include <bitset>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "dawn/common/BitSetIterator.h"
 #include "dawn/native/DawnNative.h"
 
@@ -123,8 +123,10 @@ enum class Toggle {
     UseTintIR,
     D3DDisableIEEEStrictness,
     PolyFillPacked4x8DotProduct,
+    D3D12PolyFillPackUnpack4x8,
     ExposeWGSLTestingFeatures,
     ExposeWGSLExperimentalFeatures,
+    DisablePolyfillsOnIntegerDivisonAndModulo,
 
     // Unresolved issues.
     NoWorkaroundSampleMaskBecomesZeroForAllButLastColorTarget,
@@ -226,7 +228,7 @@ class TogglesInfo {
     void EnsureToggleNameToEnumMapInitialized();
 
     bool mToggleNameToEnumMapInitialized = false;
-    std::unordered_map<std::string, Toggle> mToggleNameToEnumMap;
+    absl::flat_hash_map<std::string, Toggle> mToggleNameToEnumMap;
 };
 
 }  // namespace dawn::native

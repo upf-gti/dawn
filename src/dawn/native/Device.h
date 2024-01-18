@@ -30,10 +30,10 @@
 
 #include <memory>
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "dawn/common/ContentLessObjectCache.h"
 #include "dawn/common/Mutex.h"
 #include "dawn/native/CacheKey.h"
@@ -180,6 +180,9 @@ class DeviceBase : public RefCountedWithExternalCount {
     // The reference returned has the same lifetime as the device.
     const Format& GetValidInternalFormat(wgpu::TextureFormat format) const;
     const Format& GetValidInternalFormat(FormatIndex formatIndex) const;
+    // Get compatible view formats. The returned span contains all compatible formats not equal to
+    // `format`.
+    std::vector<const Format*> GetCompatibleViewFormats(const Format& format) const;
 
     virtual ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
         CommandEncoder* encoder,
@@ -592,7 +595,7 @@ class DeviceBase : public RefCountedWithExternalCount {
     struct DeprecationWarnings;
     std::unique_ptr<DeprecationWarnings> mDeprecationWarnings;
 
-    std::unordered_set<std::string> mWarnings;
+    absl::flat_hash_set<std::string> mWarnings;
 
     State mState = State::BeingCreated;
 
