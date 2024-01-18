@@ -122,7 +122,7 @@ endfunction()
 add_library(dawn_static_deps STATIC ${DAWN_PLACEHOLDER_FILE})
 
 #   target_link_libraries(dawn_static_deps PUBLIC dawn_native dawn_proc dawncpp)
-target_link_libraries(dawn_static_deps PUBLIC dawn_native webgpu_dawn dawncpp)
+target_link_libraries(dawn_static_deps PUBLIC webgpu_dawn libtint)
 
 bundle_static_library(dawn_static dawn_static_deps)
 
