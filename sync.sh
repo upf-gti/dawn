@@ -1,4 +1,6 @@
 
 # git remote add upstream https://dawn.googlesource.com/dawn
 
-git fetch upstream && git merge upstream/main
+git fetch upstream && \
+git merge upstream/main && \
+git submodule update --merge
