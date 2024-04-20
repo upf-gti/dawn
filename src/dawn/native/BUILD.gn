@@ -62,11 +62,11 @@ group("abseil") {
     public_deps = [ "$dawn_abseil_dir:absl" ]
   } else {
     public_deps = [
-      "${dawn_root}/third_party/gn/abseil-cpp:bits",
-      "${dawn_root}/third_party/gn/abseil-cpp:flat_hash_map",
-      "${dawn_root}/third_party/gn/abseil-cpp:flat_hash_set",
-      "${dawn_root}/third_party/gn/abseil-cpp:str_format",
-      "${dawn_root}/third_party/gn/abseil-cpp:strings",
+      "${dawn_abseil_dir}/absl/container:flat_hash_map",
+      "${dawn_abseil_dir}/absl/container:flat_hash_set",
+      "${dawn_abseil_dir}/absl/numeric:bits",
+      "${dawn_abseil_dir}/absl/strings:str_format",
+      "${dawn_abseil_dir}/absl/strings:strings",
     ]
   }
 }
@@ -258,8 +258,8 @@ source_set("sources") {
     "ComputePipeline.h",
     "CopyTextureForBrowserHelper.cpp",
     "CopyTextureForBrowserHelper.h",
-    "CreatePipelineAsyncTask.cpp",
-    "CreatePipelineAsyncTask.h",
+    "CreatePipelineAsyncEvent.cpp",
+    "CreatePipelineAsyncEvent.h",
     "Device.cpp",
     "Device.h",
     "DynamicUploader.cpp",
@@ -276,6 +276,7 @@ source_set("sources") {
     "ErrorInjector.h",
     "ErrorScope.cpp",
     "ErrorScope.h",
+    "ErrorSink.h",
     "EventManager.cpp",
     "EventManager.h",
     "ExecutionQueue.cpp",
@@ -354,6 +355,8 @@ source_set("sources") {
     "SharedBufferMemory.h",
     "SharedFence.cpp",
     "SharedFence.h",
+    "SharedResourceMemory.cpp",
+    "SharedResourceMemory.h",
     "SharedTextureMemory.cpp",
     "SharedTextureMemory.h",
     "Subresource.cpp",

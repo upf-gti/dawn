@@ -138,6 +138,9 @@ enum class Toggle {
     NoWorkaroundIndirectBaseVertexNotApplied,
     NoWorkaroundDstAlphaAsSrcBlendFactorForBothColorAndAlphaDoesNotWork,
 
+    ClearColorWithDraw,
+    VulkanSkipDraw,
+
     EnumCount,
     InvalidEnum = EnumCount,
 };

@@ -32,8 +32,6 @@ set(BUILD_TESTING OFF)
 # It is particularly interesting when building dawn as a subdirectory in
 # a parent project that does not want to use depot_tools.
 if (${DAWN_FETCH_DEPENDENCIES})
-    find_package(PythonInterp 3 REQUIRED)
-
     set(EXTRA_FETCH_ARGS)
     if (NOT TARGET gmock AND ${TINT_BUILD_TESTS})
         list(APPEND EXTRA_FETCH_ARGS --use-test-deps)
@@ -42,7 +40,7 @@ if (${DAWN_FETCH_DEPENDENCIES})
     message(STATUS "Running fetch_dawn_dependencies:")
     execute_process(
         COMMAND
-            ${PYTHON_EXECUTABLE}
+            ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tools/fetch_dawn_dependencies.py"
             --directory ${PROJECT_SOURCE_DIR}
             ${EXTRA_FETCH_ARGS}
@@ -76,6 +74,7 @@ endif()
 
 if(NOT TARGET glslang AND (${TINT_BUILD_GLSL_WRITER} OR ${TINT_BUILD_GLSL_VALIDATOR}) AND ${TINT_BUILD_CMD_TOOLS})
     set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "" FORCE)
+    set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
     add_subdirectory("${DAWN_THIRD_PARTY_DIR}/vulkan-deps/glslang/src" "${CMAKE_CURRENT_BINARY_DIR}/glslang" EXCLUDE_FROM_ALL)
 endif()
 
@@ -170,6 +169,14 @@ function(AddSubdirectoryDXC)
     set(LLVM_ENABLE_EH ON)
     set(CLANG_CL OFF)
 
+    if (DAWN_ENABLE_ASAN AND DAWN_ENABLE_UBSAN)
+        set(LLVM_USE_SANITIZER "Address;Undefined")
+    elseif(DAWN_ENABLE_ASAN)
+        set(LLVM_USE_SANITIZER "Address")
+    elseif(DAWN_ENABLE_UBSAN)
+        set(LLVM_USE_SANITIZER "Undefined")
+    endif()
+
     # Cache variables -- these are *not* scoped to this function
     set(LLVM_TARGETS_TO_BUILD "None" CACHE STRING "" FORCE)
     set(LLVM_DEFAULT_TARGET_TRIPLE "dxil-ms-dx" CACHE STRING "" FORCE)
@@ -187,8 +194,11 @@ function(AddSubdirectoryDXC)
     # not visible from our build dir. We don't need this validation, so just disable it.
     set(CLANG_FORMAT_EXE "" CACHE STRING "" FORCE)
 
-    # DXC sometimes asserts on valid HLSL, so disable all assertions.
-    set(LLVM_ENABLE_ASSERTIONS OFF CACHE BOOL "" FORCE)
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT DAWN_DXC_DISABLE_ASSERTS_DEBUG)
+        set(LLVM_ENABLE_ASSERTIONS ON CACHE BOOL "" FORCE)
+    else()
+        set(LLVM_ENABLE_ASSERTIONS OFF CACHE BOOL "" FORCE)
+    endif()
 
     # Override RPATH so that it points to current dir (exe path). This allows both executable and
     # shared library to be in the same location, which we set below. Note that DXC places places

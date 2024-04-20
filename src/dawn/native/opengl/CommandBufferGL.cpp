@@ -260,6 +260,20 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
     }
 
   private:
+    void BindSamplerAtIndex(const OpenGLFunctions& gl, SamplerBase* s, GLuint samplerIndex) {
+        Sampler* sampler = ToBackend(s);
+
+        for (PipelineGL::SamplerUnit unit : mPipeline->GetTextureUnitsForSampler(samplerIndex)) {
+            // Only use filtering for certain texture units, because int
+            // and uint texture are only complete without filtering
+            if (unit.shouldUseFiltering) {
+                gl.BindSampler(unit.unit, sampler->GetFilteringHandle());
+            } else {
+                gl.BindSampler(unit.unit, sampler->GetNonFilteringHandle());
+            }
+        }
+    }
+
     void ApplyBindGroup(const OpenGLFunctions& gl,
                         BindGroupIndex groupIndex,
                         BindGroupBase* group,
@@ -270,7 +284,7 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
              ++bindingIndex) {
             const BindingInfo& bindingInfo = group->GetLayout()->GetBindingInfo(bindingIndex);
 
-            if (std::holds_alternative<TextureBindingLayout>(bindingInfo.bindingLayout)) {
+            if (std::holds_alternative<TextureBindingInfo>(bindingInfo.bindingLayout)) {
                 TextureView* view = ToBackend(group->GetBindingAsTextureView(bindingIndex));
                 view->CopyIfNeeded();
             }
@@ -281,7 +295,7 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
             const BindingInfo& bindingInfo = group->GetLayout()->GetBindingInfo(bindingIndex);
             MatchVariant(
                 bindingInfo.bindingLayout,
-                [&](const BufferBindingLayout& layout) {
+                [&](const BufferBindingInfo& layout) {
                     BufferBinding binding = group->GetBindingAsBufferBinding(bindingIndex);
                     GLuint buffer = ToBackend(binding.buffer)->GetHandle();
                     GLuint index = indices[bindingIndex];
@@ -308,22 +322,14 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
 
                     gl.BindBufferRange(target, index, buffer, offset, binding.size);
                 },
-                [&](const SamplerBindingLayout&) {
-                    Sampler* sampler = ToBackend(group->GetBindingAsSampler(bindingIndex));
-                    GLuint samplerIndex = indices[bindingIndex];
-
-                    for (PipelineGL::SamplerUnit unit :
-                         mPipeline->GetTextureUnitsForSampler(samplerIndex)) {
-                        // Only use filtering for certain texture units, because int
-                        // and uint texture are only complete without filtering
-                        if (unit.shouldUseFiltering) {
-                            gl.BindSampler(unit.unit, sampler->GetFilteringHandle());
-                        } else {
-                            gl.BindSampler(unit.unit, sampler->GetNonFilteringHandle());
-                        }
-                    }
+                [&](const StaticSamplerHolderBindingLayout& layout) {
+                    BindSamplerAtIndex(gl, layout.sampler.Get(), indices[bindingIndex]);
                 },
-                [&](const TextureBindingLayout&) {
+                [&](const SamplerBindingLayout&) {
+                    BindSamplerAtIndex(gl, group->GetBindingAsSampler(bindingIndex),
+                                       indices[bindingIndex]);
+                },
+                [&](const TextureBindingInfo&) {
                     TextureView* view = ToBackend(group->GetBindingAsTextureView(bindingIndex));
                     GLuint handle = view->GetHandle();
                     GLenum target = view->GetGLTarget();
@@ -363,7 +369,7 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                     // internal uniform buffer.
                     UpdateTextureBuiltinsUniformData(gl, view, groupIndex, bindingIndex);
                 },
-                [&](const StorageTextureBindingLayout& layout) {
+                [&](const StorageTextureBindingInfo& layout) {
                     TextureView* view = ToBackend(group->GetBindingAsTextureView(bindingIndex));
                     Texture* texture = ToBackend(view->GetTexture());
                     GLuint handle = texture->GetHandle();

@@ -125,8 +125,13 @@ namespace dawn::wire::client {
             obj->Release();
         }
 
+        void Client{{as_MethodSuffix(type.name, Name("add ref"))}}({{cType}} cObj) {
+            reinterpret_cast<{{Type}}*>(cObj)->AddRef();
+        }
+
+        //* TODO(dawn:2234): Deprecated. Remove once no longer user.
         void Client{{as_MethodSuffix(type.name, Name("reference"))}}({{cType}} cObj) {
-            reinterpret_cast<{{Type}}*>(cObj)->Reference();
+            Client{{as_MethodSuffix(type.name, Name("add ref"))}}(cObj);
         }
     {% endfor %}
 
@@ -180,26 +185,20 @@ namespace dawn::wire::client {
 
     {% set Prefix = metadata.proc_table_prefix %}
 
-    template <typename... MemberPtrPairs>
-    constexpr {{Prefix}}ProcTable MakeProcTable(int, MemberPtrPairs... pairs) {
+    constexpr {{Prefix}}ProcTable MakeProcTable() {
         {{Prefix}}ProcTable procs = {};
-        ([&](auto& pair){
-            procs.*(pair.first) = pair.second;
-        }(pairs), ...);
-        return procs;
-    }
-
-    static {{Prefix}}ProcTable gProcTable = MakeProcTable(
-        /* unused */ 0
         {% for function in by_category["function"] %}
-            , std::make_pair(&{{Prefix}}ProcTable::{{as_varName(function.name)}}, Client{{as_cppType(function.name)}})
+            procs.{{as_varName(function.name)}} = Client{{as_cppType(function.name)}};
         {% endfor %}
         {% for type in by_category["object"] %}
             {% for method in c_methods(type) %}
-                , std::make_pair(&{{Prefix}}ProcTable::{{as_varName(type.name, method.name)}}, Client{{as_MethodSuffix(type.name, method.name)}})
+                procs.{{as_varName(type.name, method.name)}} = Client{{as_MethodSuffix(type.name, method.name)}};
             {% endfor %}
         {% endfor %}
-    );
+        return procs;
+    }
+
+    static {{Prefix}}ProcTable gProcTable = MakeProcTable();
 
     const {{Prefix}}ProcTable& GetProcs() {
         return gProcTable;

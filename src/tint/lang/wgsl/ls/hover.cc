@@ -64,6 +64,7 @@ namespace tint::wgsl::ls {
 
 namespace {
 
+/// @returns a lsp::MarkedStringWithLanguage with the content @p wgsl, using the language `wgsl`
 lsp::MarkedStringWithLanguage WGSL(std::string wgsl) {
     lsp::MarkedStringWithLanguage str;
     str.language = "wgsl";
@@ -71,6 +72,7 @@ lsp::MarkedStringWithLanguage WGSL(std::string wgsl) {
     return str;
 }
 
+/// PrintConstant() writes the constant value @p val as a WGSL value to the StringStream @p ss
 void PrintConstant(const core::constant::Value* val, StringStream& ss) {
     Switch(
         val,  //
@@ -98,6 +100,7 @@ void PrintConstant(const core::constant::Value* val, StringStream& ss) {
         });
 }
 
+/// Variable() writes the hover information for the variable @p v to @p out
 void Variable(const sem::Variable* v, std::vector<lsp::MarkedString>& out) {
     StringStream ss;
     auto* kind = Switch(
@@ -122,6 +125,7 @@ void Variable(const sem::Variable* v, std::vector<lsp::MarkedString>& out) {
     out.push_back(WGSL(ss.str()));
 }
 
+/// Function() writes the hover information for the function @p f to @p out
 void Function(const sem::Function* f, std::vector<lsp::MarkedString>& out) {
     StringStream ss;
     ss << "fn " << f->Declaration()->name->symbol.NameView();
@@ -142,6 +146,8 @@ void Function(const sem::Function* f, std::vector<lsp::MarkedString>& out) {
     out.push_back(WGSL(ss.str()));
 }
 
+/// Call() writes the hover information for a call to the function with the name @p name with
+/// semantic info @p c, to @p out
 void Call(std::string_view name, const sem::Call* c, std::vector<lsp::MarkedString>& out) {
     StringStream ss;
     ss << name << "(";
@@ -165,6 +171,7 @@ void Call(std::string_view name, const sem::Call* c, std::vector<lsp::MarkedStri
     out.push_back(WGSL(ss.str()));
 }
 
+/// Constant() writes the hover information for the constant value @p val to @p out
 void Constant(const core::constant::Value* val, std::vector<lsp::MarkedString>& out) {
     StringStream ss;
     PrintConstant(val, ss);
@@ -180,7 +187,8 @@ Server::Handle(const lsp::TextDocumentHoverRequest& r) {
         return lsp::Null{};
     }
 
-    auto* node = (*file)->NodeAt<CastableBase, File::UnwrapMode::kNoUnwrap>(Conv(r.position));
+    auto* node =
+        (*file)->NodeAt<CastableBase, File::UnwrapMode::kNoUnwrap>((*file)->Conv(r.position));
     if (!node) {
         return lsp::Null{};
     }
@@ -192,7 +200,7 @@ Server::Handle(const lsp::TextDocumentHoverRequest& r) {
             Constant(val, strings);
             lsp::Hover hover;
             hover.contents = std::move(strings);
-            hover.range = Conv(materialize->Declaration()->source.range);
+            hover.range = (*file)->Conv(materialize->Declaration()->source.range);
             return hover;
         }
     }
@@ -202,27 +210,27 @@ Server::Handle(const lsp::TextDocumentHoverRequest& r) {
         Unwrap(node),  //
         [&](const sem::VariableUser* user) {
             Variable(user->Variable(), strings);
-            range = Conv(user->Declaration()->source.range);
+            range = (*file)->Conv(user->Declaration()->source.range);
         },
         [&](const sem::Variable* v) {
             Variable(v, strings);
-            range = Conv(v->Declaration()->name->source.range);
+            range = (*file)->Conv(v->Declaration()->name->source.range);
         },
         [&](const sem::Call* c) {
             Call(c->Declaration()->target->identifier->symbol.NameView(), c, strings);
-            range = Conv(c->Declaration()->target->source.range);
+            range = (*file)->Conv(c->Declaration()->target->source.range);
         },
         [&](const sem::FunctionExpression* expr) {
             Function(expr->Function(), strings);
-            range = Conv(expr->Declaration()->source.range);
+            range = (*file)->Conv(expr->Declaration()->source.range);
         },
         [&](const sem::BuiltinEnumExpression<wgsl::BuiltinFn>* fn) {
-            if (auto* call = (*file)->NodeAt<sem::Call>(Conv(r.position))) {
+            if (auto* call = (*file)->NodeAt<sem::Call>((*file)->Conv(r.position))) {
                 Call(str(fn->Value()), call, strings);
             } else {
                 strings.push_back(WGSL(str(fn->Value())));
             }
-            range = Conv(fn->Declaration()->source.range);
+            range = (*file)->Conv(fn->Declaration()->source.range);
         },
         [&](const sem::TypeExpression* expr) {
             Switch(
@@ -231,7 +239,7 @@ Server::Handle(const lsp::TextDocumentHoverRequest& r) {
                     strings.push_back(WGSL("struct " + str->Name().Name()));
                 },
                 [&](Default) { strings.push_back(WGSL(expr->Type()->FriendlyName())); });
-            range = Conv(expr->Declaration()->source.range);
+            range = (*file)->Conv(expr->Declaration()->source.range);
         },
         [&](const sem::StructMemberAccess* access) {
             if (auto* member = access->Member()->As<sem::StructMember>()) {
@@ -239,13 +247,13 @@ Server::Handle(const lsp::TextDocumentHoverRequest& r) {
                 ss << member->Declaration()->name->symbol.NameView() << " : "
                    << member->Type()->FriendlyName();
                 strings.push_back(WGSL(ss.str()));
-                range = Conv(access->Declaration()->member->source.range);
+                range = (*file)->Conv(access->Declaration()->member->source.range);
             }
         },
         [&](const sem::ValueExpression* expr) {
             if (auto* val = expr->ConstantValue()) {
                 Constant(val, strings);
-                range = Conv(expr->Declaration()->source.range);
+                range = (*file)->Conv(expr->Declaration()->source.range);
             }
         });
 

@@ -31,7 +31,7 @@ DawnJSONGenerator(
     RESULT_VARIABLE "DAWN_NATIVE_UTILS_GEN_SOURCES"
 )
 
-add_library(dawn_native ${DAWN_PLACEHOLDER_FILE})
+add_library(dawn_native)
 common_compile_options(dawn_native)
 
 target_compile_definitions(dawn_native PRIVATE "DAWN_NATIVE_IMPLEMENTATION")
@@ -113,8 +113,8 @@ target_sources(dawn_native
     "ComputePipeline.h"
     "CopyTextureForBrowserHelper.cpp"
     "CopyTextureForBrowserHelper.h"
-    "CreatePipelineAsyncTask.cpp"
-    "CreatePipelineAsyncTask.h"
+    "CreatePipelineAsyncEvent.cpp"
+    "CreatePipelineAsyncEvent.h"
     "Device.cpp"
     "Device.h"
     "DynamicUploader.cpp"
@@ -131,6 +131,7 @@ target_sources(dawn_native
     "ErrorInjector.h"
     "ErrorScope.cpp"
     "ErrorScope.h"
+    "ErrorSink.h"
     "EventManager.cpp"
     "EventManager.h"
     "Features.cpp"
@@ -213,6 +214,8 @@ target_sources(dawn_native
     "SharedBufferMemory.h"
     "SharedFence.cpp"
     "SharedFence.h"
+    "SharedResourceMemory.cpp"
+    "SharedResourceMemory.h"
     "SharedTextureMemory.cpp"
     "SharedTextureMemory.h"
     "Subresource.cpp"
@@ -764,10 +767,16 @@ DawnJSONGenerator(
     RESULT_VARIABLE "WEBGPU_DAWN_NATIVE_PROC_GEN"
 )
 
-add_library(webgpu_dawn ${DAWN_PLACEHOLDER_FILE})
+# A convenience target that bundles dawn_native and procs calling it directly so that
+# applications link against it and have WebGPU work without jumping through more hoops.
+# Note that this library name is referenced in several places, search for it and things like:
+# "{{.*}}_dawn" when you rename it.
+add_library(webgpu_dawn)
 common_compile_options(webgpu_dawn)
-target_link_libraries(webgpu_dawn PRIVATE dawn_native)
-target_link_libraries(webgpu_dawn PUBLIC dawn_headers)
+target_link_libraries(webgpu_dawn
+    PRIVATE dawn_native
+    PUBLIC dawn_headers
+)
 target_compile_definitions(webgpu_dawn PRIVATE "WGPU_IMPLEMENTATION")
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(webgpu_dawn PRIVATE "WGPU_SHARED_LIBRARY")

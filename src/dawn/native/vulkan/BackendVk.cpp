@@ -283,6 +283,10 @@ OnInstanceCreationDebugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT mess
 
 }  // anonymous namespace
 
+SamplerYCbCrVulkanDescriptor::SamplerYCbCrVulkanDescriptor() {
+    sType = wgpu::SType::SamplerYCbCrVulkanDescriptor;
+}
+
 VulkanInstance::VulkanInstance() = default;
 
 VulkanInstance::~VulkanInstance() {
@@ -596,10 +600,12 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
             if (!mVulkanInstancesCreated[icd]) {
                 mVulkanInstancesCreated.set(icd);
 
-                instance->ConsumedErrorAndWarnOnce([&]() -> MaybeError {
-                    DAWN_TRY_ASSIGN(mVulkanInstances[icd], VulkanInstance::Create(instance, xrConfig, icd));
-                    return {};
-                }());
+                [[maybe_unused]] bool hadError =
+                    instance->ConsumedErrorAndWarnOnce([&]() -> MaybeError {
+                        DAWN_TRY_ASSIGN(mVulkanInstances[icd],
+                                        VulkanInstance::Create(instance, xrConfig, icd));
+                        return {};
+                    }());
             }
 
             if (mVulkanInstances[icd] == nullptr) {

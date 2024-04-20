@@ -287,7 +287,7 @@ dawn_test("dawn_unittests") {
     ":native_mocks_sources",
     ":partition_alloc_support",
     ":platform_mocks_sources",
-    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/include/dawn:cpp_headers",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
     "${dawn_root}/src/dawn/native:sources",
@@ -367,11 +367,12 @@ dawn_test("dawn_unittests") {
     "unittests/native/BlobTests.cpp",
     "unittests/native/CacheRequestTests.cpp",
     "unittests/native/CommandBufferEncodingTests.cpp",
-    "unittests/native/CreatePipelineAsyncTaskTests.cpp",
+    "unittests/native/CreatePipelineAsyncEventTests.cpp",
     "unittests/native/DestroyObjectTests.cpp",
     "unittests/native/DeviceAsyncTaskTests.cpp",
     "unittests/native/DeviceCreationTests.cpp",
     "unittests/native/LimitsTests.cpp",
+    "unittests/native/MemoryInstrumentationTests.cpp",
     "unittests/native/ObjectContentHasherTests.cpp",
     "unittests/native/StreamTests.cpp",
     "unittests/validation/BindGroupValidationTests.cpp",
@@ -462,6 +463,10 @@ dawn_test("dawn_unittests") {
     sources += [ "unittests/d3d12/CopySplitTests.cpp" ]
   }
 
+  if (dawn_enable_vulkan) {
+    sources += [ "unittests/validation/YCbCrSamplerValidationTests.cpp" ]
+  }
+
   # When building inside Chromium, use their gtest main function because it is
   # needed to run in swarming correctly.
   if (build_with_chromium) {
@@ -500,7 +505,7 @@ source_set("test_infra_sources") {
 
   deps = [
     ":partition_alloc_support",
-    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/include/dawn:cpp_headers",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
     "${dawn_root}/src/dawn/native:sources",
@@ -559,7 +564,7 @@ source_set("end2end_tests_sources") {
   deps = [
     ":platform_mocks_sources",
     ":test_infra_sources",
-    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/include/dawn:cpp_headers",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
     "${dawn_root}/src/dawn/native:headers",
@@ -710,10 +715,16 @@ source_set("end2end_tests_sources") {
 
   if (dawn_supports_glfw_for_windowing) {
     sources += [
+      "end2end/SurfaceConfigurationValidationTests.cpp",
+      "end2end/SurfaceTests.cpp",
       "end2end/SwapChainTests.cpp",
       "end2end/SwapChainValidationTests.cpp",
       "end2end/WindowSurfaceTests.cpp",
     ]
+  }
+
+  if (dawn_enable_vulkan) {
+    sources += [ "end2end/YCbCrSamplerTests.cpp" ]
   }
 
   if (dawn_enable_d3d11 || dawn_enable_d3d12 ||
@@ -735,7 +746,7 @@ source_set("white_box_tests_sources") {
 
   deps = [
     ":test_infra_sources",
-    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/include/dawn:cpp_headers",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
     "${dawn_root}/src/dawn/partition_alloc:raw_ptr",
@@ -871,7 +882,7 @@ dawn_test("dawn_end2end_tests") {
 dawn_test("dawn_perf_tests") {
   deps = [
     ":test_infra_sources",
-    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/include/dawn:cpp_headers",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
     "${dawn_root}/src/dawn/partition_alloc:raw_ptr",

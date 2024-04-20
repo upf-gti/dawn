@@ -178,7 +178,7 @@ ResultOrError<CacheResult<MslCompilation>> TranslateToMSL(
                     bindings.sampler.emplace(srcBindingPoint, tint::msl::writer::binding::Sampler{
                                                                   dstBindingPoint.binding});
                 },
-                [&](const SampledTextureBindingInfo& bindingInfo) {
+                [&](const TextureBindingInfo& bindingInfo) {
                     bindings.texture.emplace(srcBindingPoint, tint::msl::writer::binding::Texture{
                                                                   dstBindingPoint.binding});
                 },
@@ -425,7 +425,8 @@ MaybeError ShaderModule::CreateFunction(SingleShaderStage stage,
             (*compileOptions).preserveInvariance = true;
         }
     }
-    (*compileOptions).fastMathEnabled = true;
+
+    (*compileOptions).fastMathEnabled = !GetStrictMath().value_or(false);
 
     auto mtlDevice = ToBackend(GetDevice())->GetMTLDevice();
     NSError* error = nullptr;

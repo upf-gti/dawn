@@ -50,20 +50,27 @@ namespace tint::wgsl::ls {
 
 namespace {
 
+/// Token describes a single semantic token, as returned by TextDocumentSemanticTokensFullRequest.
 struct Token {
+    /// The start position of the token
     lsp::Position position;
+    /// The kind of token. Maps to enumerators in SemToken.
     size_t kind = 0;
+    /// The length of the token in UTF-8 codepoints.
     size_t length = 0;
 };
 
-Token TokenFromRange(const tint::Source::Range& range, SemToken::Kind kind) {
+/// @returns a Token built from the source range @p range with the kind @p kind
+Token TokenFromRange(const File& file, const tint::Source::Range& range, SemToken::Kind kind) {
     Token tok;
-    tok.position = Conv(range.begin);
+    tok.position = file.Conv(range.begin);
     tok.length = range.end.column - range.begin.column;
     tok.kind = kind;
     return tok;
 }
 
+/// @returns the token kind for the expression @p expr, or nullptr if the expression does not have a
+/// token kind.
 std::optional<SemToken::Kind> TokenKindFor(const sem::Expression* expr) {
     return Switch<std::optional<SemToken::Kind>>(
         Unwrap(expr),  //
@@ -75,6 +82,7 @@ std::optional<SemToken::Kind> TokenKindFor(const sem::Expression* expr) {
         [](tint::Default) { return std::nullopt; });
 }
 
+/// @returns all the semantic tokens in the file @p file, in sequential order.
 std::vector<Token> Tokens(File& file) {
     std::vector<Token> tokens;
     auto& sem = file.program.Sem();
@@ -83,25 +91,30 @@ std::vector<Token> Tokens(File& file) {
             node,  //
             [&](const ast::IdentifierExpression* expr) {
                 if (auto kind = TokenKindFor(sem.Get(expr))) {
-                    tokens.push_back(TokenFromRange(expr->identifier->source.range, *kind));
+                    tokens.push_back(TokenFromRange(file, expr->identifier->source.range, *kind));
                 }
             },
             [&](const ast::Struct* str) {
-                tokens.push_back(TokenFromRange(str->name->source.range, SemToken::kType));
+                tokens.push_back(TokenFromRange(file, str->name->source.range, SemToken::kType));
             },
             [&](const ast::StructMember* member) {
-                tokens.push_back(TokenFromRange(member->name->source.range, SemToken::kMember));
+                tokens.push_back(
+                    TokenFromRange(file, member->name->source.range, SemToken::kMember));
             },
             [&](const ast::Variable* var) {
-                tokens.push_back(TokenFromRange(var->name->source.range, SemToken::kVariable));
+                tokens.push_back(
+                    TokenFromRange(file, var->name->source.range, SemToken::kVariable));
             },
             [&](const ast::Function* fn) {
-                tokens.push_back(TokenFromRange(fn->name->source.range, SemToken::kFunction));
+                tokens.push_back(TokenFromRange(file, fn->name->source.range, SemToken::kFunction));
             },
             [&](const ast::MemberAccessorExpression* a) {
-                tokens.push_back(TokenFromRange(a->member->source.range, SemToken::kMember));
+                tokens.push_back(TokenFromRange(file, a->member->source.range, SemToken::kMember));
             });
     }
+    std::sort(tokens.begin(), tokens.end(),
+              [](const Token& a, const Token& b) { return a.position < b.position; });
+
     return tokens;
 }
 
@@ -117,9 +130,6 @@ Server::Handle(const lsp::TextDocumentSemanticTokensFullRequest& r) {
         Token last;
 
         auto tokens = Tokens(**file);
-        std::sort(tokens.begin(), tokens.end(),
-                  [](const Token& a, const Token& b) { return a.position < b.position; });
-
         for (auto tok : tokens) {
             if (last.position.line != tok.position.line) {
                 last.position.character = 0;

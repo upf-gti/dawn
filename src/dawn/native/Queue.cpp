@@ -166,19 +166,18 @@ struct SubmittedWorkDone : TrackTaskCallback {
         DAWN_ASSERT(mSerial != kMaxExecutionSerial);
         TRACE_EVENT1(mPlatform, General, "Queue::SubmittedWorkDone::Finished", "serial",
                      uint64_t(mSerial));
-        mCallback(WGPUQueueWorkDoneStatus_Success, mUserdata);
+        mCallback(WGPUQueueWorkDoneStatus_Success, mUserdata.ExtractAsDangling());
         mCallback = nullptr;
     }
     void HandleDeviceLossImpl() override {
         DAWN_ASSERT(mCallback != nullptr);
-        mCallback(WGPUQueueWorkDoneStatus_DeviceLost, mUserdata);
+        mCallback(WGPUQueueWorkDoneStatus_DeviceLost, mUserdata.ExtractAsDangling());
         mCallback = nullptr;
     }
     void HandleShutDownImpl() override { HandleDeviceLossImpl(); }
 
     WGPUQueueWorkDoneCallback mCallback = nullptr;
-    // TODO(https://crbug.com/dawn/2349): Investigate DanglingUntriaged in dawn/native.
-    raw_ptr<void, DanglingUntriaged> mUserdata;
+    raw_ptr<void> mUserdata;
 };
 
 class ErrorQueue : public QueueBase {
@@ -203,8 +202,7 @@ class ErrorQueue : public QueueBase {
 struct WorkDoneEvent final : public EventManager::TrackedEvent {
     std::optional<wgpu::QueueWorkDoneStatus> mEarlyStatus;
     WGPUQueueWorkDoneCallback mCallback;
-    // TODO(https://crbug.com/dawn/2349): Investigate DanglingUntriaged in dawn/native.
-    raw_ptr<void, DanglingUntriaged> mUserdata;
+    raw_ptr<void> mUserdata;
 
     // Create an event backed by the given queue execution serial.
     WorkDoneEvent(const QueueWorkDoneCallbackInfo& callbackInfo,
@@ -234,7 +232,7 @@ struct WorkDoneEvent final : public EventManager::TrackedEvent {
             status = mEarlyStatus.value();
         }
 
-        mCallback(ToAPI(status), mUserdata);
+        mCallback(ToAPI(status), mUserdata.ExtractAsDangling());
     }
 };
 
@@ -289,9 +287,9 @@ void QueueBase::APISubmit(uint32_t commandCount, CommandBufferBase* const* comma
         commands[i]->Destroy();
     }
 
-    DAWN_UNUSED(GetDevice()->ConsumedError(
+    [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
         std::move(result), "calling %s.Submit(%s)", this,
-        ityp::span<uint32_t, CommandBufferBase* const>(commands, commandCount)));
+        ityp::span<uint32_t, CommandBufferBase* const>(commands, commandCount));
 }
 
 void QueueBase::APIOnSubmittedWorkDone(WGPUQueueWorkDoneCallback callback, void* userdata) {
@@ -413,10 +411,10 @@ void QueueBase::APIWriteBuffer(BufferBase* buffer,
                                uint64_t bufferOffset,
                                const void* data,
                                size_t size) {
-    DAWN_UNUSED(
+    [[maybe_unused]] bool hadError =
         GetDevice()->ConsumedError(WriteBuffer(buffer, bufferOffset, data, size),
                                    "calling %s.WriteBuffer(%s, (%d bytes), data, (%d bytes))", this,
-                                   buffer, bufferOffset, size));
+                                   buffer, bufferOffset, size);
 }
 
 MaybeError QueueBase::WriteBuffer(BufferBase* buffer,
@@ -457,10 +455,10 @@ void QueueBase::APIWriteTexture(const ImageCopyTexture* destination,
                                 size_t dataSize,
                                 const TextureDataLayout* dataLayout,
                                 const Extent3D* writeSize) {
-    DAWN_UNUSED(GetDevice()->ConsumedError(
+    [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
         WriteTextureInternal(destination, data, dataSize, *dataLayout, writeSize),
         "calling %s.WriteTexture(%s, (%u bytes), %s, %s)", this, destination, dataSize, dataLayout,
-        writeSize));
+        writeSize);
 }
 
 MaybeError QueueBase::WriteTextureInternal(const ImageCopyTexture* destinationOrig,
@@ -529,16 +527,16 @@ void QueueBase::APICopyTextureForBrowser(const ImageCopyTexture* source,
                                          const ImageCopyTexture* destination,
                                          const Extent3D* copySize,
                                          const CopyTextureForBrowserOptions* options) {
-    DAWN_UNUSED(GetDevice()->ConsumedError(
-        CopyTextureForBrowserInternal(source, destination, copySize, options)));
+    [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
+        CopyTextureForBrowserInternal(source, destination, copySize, options));
 }
 
 void QueueBase::APICopyExternalTextureForBrowser(const ImageCopyExternalTexture* source,
                                                  const ImageCopyTexture* destination,
                                                  const Extent3D* copySize,
                                                  const CopyTextureForBrowserOptions* options) {
-    DAWN_UNUSED(GetDevice()->ConsumedError(
-        CopyExternalTextureForBrowserInternal(source, destination, copySize, options)));
+    [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
+        CopyExternalTextureForBrowserInternal(source, destination, copySize, options));
 }
 
 MaybeError QueueBase::CopyTextureForBrowserInternal(const ImageCopyTexture* sourceOrig,

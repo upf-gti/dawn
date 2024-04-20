@@ -63,13 +63,20 @@ class ProcTableAsClass {
         //*   - setDeviceLostCallback
         //*   - setUncapturedErrorCallback
         //*   - setLoggingCallback
-        {%- set LegacyCallbackFunctions = ['set device lost callback', 'set uncaptured error callback', 'set logging callback'] %}
+        {%- set LegacyCallbackFunctions = ['set uncaptured error callback', 'set logging callback'] %}
+
+        //* Manually implemented mock functions due to incompatibility.
+        {% set ManuallyMockedFunctions = ['set device lost callback'] %}
 
         {%- for type in by_category["object"] %}
 
-            virtual void {{as_MethodSuffix(type.name, Name("reference"))}}({{as_cType(type.name)}} self) = 0;
+            virtual void {{as_MethodSuffix(type.name, Name("add ref"))}}({{as_cType(type.name)}} self) = 0;
             virtual void {{as_MethodSuffix(type.name, Name("release"))}}({{as_cType(type.name)}} self) = 0;
-            {% for method in type.methods %}
+            // TODO(dawn::2234): Deprecated. Remove once no longer used.
+            void {{as_MethodSuffix(type.name, Name("reference"))}}({{as_cType(type.name)}} self) {
+                {{as_MethodSuffix(type.name, Name("add ref"))}}(self);
+            }
+            {% for method in type.methods if method.name.get() not in ManuallyMockedFunctions %}
                 {% set Suffix = as_CppMethodSuffix(type.name, method.name) %}
                 {% if not has_callback_arguments(method) and not has_callback_info(method) %}
                     virtual {{as_cType(method.return_type.name)}} {{Suffix}}(
@@ -122,6 +129,17 @@ class ProcTableAsClass {
             {% endfor %}
         {% endfor %}
 
+        // Manually implement device lost related callback helpers for testing.
+        void DeviceSetDeviceLostCallback(WGPUDevice device,
+                                         WGPUDeviceLostCallback callback,
+                                         void* userdata);
+        virtual void OnDeviceSetDeviceLostCallback(WGPUDevice device,
+                                                   WGPUDeviceLostCallback callback,
+                                                   void* userdata) = 0;
+        void CallDeviceSetDeviceLostCallbackCallback(WGPUDevice device,
+                                                     WGPUDeviceLostReason reason,
+                                                     char const* message);
+
         struct Object {
             ProcTableAsClass* procs = nullptr;
             {% for type in by_category["object"] %}
@@ -138,6 +156,10 @@ class ProcTableAsClass {
                     {% endfor %}
                 {% endfor %}
             {% endfor %}
+            // Manually implement device lost related callback helpers for testing.
+            WGPUDeviceLostCallback mDeviceLostOldCallback = nullptr;
+            WGPUDeviceLostCallbackNew mDeviceLostCallback = nullptr;
+            void* mDeviceLostUserdata = 0;
         };
 
     private:
@@ -156,7 +178,7 @@ class MockProcTable : public ProcTableAsClass {
 
         {%- for type in by_category["object"] %}
 
-            MOCK_METHOD(void, {{as_MethodSuffix(type.name, Name("reference"))}}, ({{as_cType(type.name)}} self), (override));
+            MOCK_METHOD(void, {{as_MethodSuffix(type.name, Name("add ref"))}}, ({{as_cType(type.name)}} self), (override));
             MOCK_METHOD(void, {{as_MethodSuffix(type.name, Name("release"))}}, ({{as_cType(type.name)}} self), (override));
             {% for method in type.methods if not has_callback_arguments(method) and not has_callback_info(method) %}
                 MOCK_METHOD({{as_cType(method.return_type.name)}},{{" "}}
@@ -178,6 +200,12 @@ class MockProcTable : public ProcTableAsClass {
                     ), (override));
             {% endfor %}
         {% endfor %}
+
+        // Manually implement device lost related callback helpers for testing.
+        MOCK_METHOD(void,
+                    OnDeviceSetDeviceLostCallback,
+                    (WGPUDevice device, WGPUDeviceLostCallback callback, void* userdata),
+                    (override));
 };
 
 #endif  // MOCK_{{API}}_H

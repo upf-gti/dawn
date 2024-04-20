@@ -27,6 +27,7 @@
 
 #include "src/tint/lang/wgsl/ls/server.h"
 
+#include "langsvr/lsp/lsp.h"
 #include "langsvr/session.h"
 
 #include "src/tint/lang/wgsl/ls/sem_token.h"
@@ -39,6 +40,11 @@ namespace tint::wgsl::ls {
 Server::Server(langsvr::Session& session) : session_(session) {
     session.Register([&](const lsp::InitializeRequest&) {
         lsp::InitializeResult result;
+        result.capabilities.completion_provider = [] {
+            lsp::CompletionOptions opts;
+            opts.completion_item = lsp::ServerCompletionItemOptions{};
+            return opts;
+        }();
         result.capabilities.definition_provider = true;
         result.capabilities.document_symbol_provider = [] {
             lsp::DocumentSymbolOptions opts;
@@ -92,6 +98,7 @@ Server::Server(langsvr::Session& session) : session_(session) {
         [&](const lsp::WorkspaceDidChangeConfigurationNotification& n) { return Handle(n); });
 
     // Request handlers
+    session.Register([&](const lsp::TextDocumentCompletionRequest& r) { return Handle(r); });
     session.Register([&](const lsp::TextDocumentDefinitionRequest& r) { return Handle(r); });
     session.Register([&](const lsp::TextDocumentDocumentSymbolRequest& r) { return Handle(r); });
     session.Register([&](const lsp::TextDocumentHoverRequest& r) { return Handle(r); });
@@ -102,14 +109,16 @@ Server::Server(langsvr::Session& session) : session_(session) {
     session.Register(
         [&](const lsp::TextDocumentSemanticTokensFullRequest& r) { return Handle(r); });
     session.Register([&](const lsp::TextDocumentSignatureHelpRequest& r) { return Handle(r); });
+    session.Register(
+        [&](const lsp::WorkspaceDidChangeWatchedFilesNotification& n) { return Handle(n); });
 }
 
 Server::~Server() = default;
 
 Server::Logger::~Logger() {
     lsp::WindowLogMessageNotification n;
-    n.type = lsp::MessageType::kLog;
     n.message = msg.str();
+    n.type = type;
     (void)session.Send(n);
 }
 

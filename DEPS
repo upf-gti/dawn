@@ -97,7 +97,7 @@ deps = {
   },
 
   'third_party/depot_tools': {
-    'url': '{chromium_git}/chromium/tools/depot_tools.git@1cba129f31738c18656b500b7c3a0c6906807cb9',
+    'url': '{chromium_git}/chromium/tools/depot_tools.git@1abad43773fe69d5e76093ba0979544914b0a710',
     'condition': 'dawn_standalone',
   },
 
@@ -179,17 +179,17 @@ deps = {
   },
 
   'third_party/angle': {
-    'url': '{chromium_git}/angle/angle@ee02014d875f45635779762a8ffd0aee1ec29990',
+    'url': '{chromium_git}/angle/angle@23b8a833f3da67e3a1bd7985fcec256ab3241bb2',
     'condition': 'dawn_standalone',
   },
 
   'third_party/swiftshader': {
-    'url': '{swiftshader_git}/SwiftShader@bbe6452b420c5ddc4b0fd421b0a3ce271262f4ca',
+    'url': '{swiftshader_git}/SwiftShader@9aec4b969291f0a218b537f44f8a1387cf494316',
     'condition': 'dawn_standalone',
   },
 
   'third_party/vulkan-deps': {
-    'url': '{chromium_git}/vulkan-deps@46287e4a45a738a51a7660a938887fb73d26b4e6',
+    'url': '{chromium_git}/vulkan-deps@71b11532ed72adaec5d5e006d92ce741b71379a3',
     'condition': 'dawn_standalone',
   },
 
@@ -199,12 +199,12 @@ deps = {
   },
 
   'third_party/abseil-cpp': {
-    'url': '{chromium_git}/chromium/src/third_party/abseil-cpp@1cd1f16ff8f7fb5402aeda870c82652edf8f663a',
+    'url': '{chromium_git}/chromium/src/third_party/abseil-cpp@a64dd87cec79c80c88190265cfea0cbd4027677f',
     'condition': 'dawn_standalone',
   },
 
   'third_party/dxc': {
-    'url': '{chromium_git}/external/github.com/microsoft/DirectXShaderCompiler@40e27eb4e912062a07622ea6a6993b524715d3b3',
+    'url': '{chromium_git}/external/github.com/microsoft/DirectXShaderCompiler@e2f0b98440196b897074adc8ebae46e2c5cee3e2',
   },
 
   'third_party/dxheaders': {
@@ -223,7 +223,7 @@ deps = {
 
   # WebGPU CTS - not used directly by Dawn, only transitively by Chromium.
   'third_party/webgpu-cts': {
-    'url': '{chromium_git}/external/github.com/gpuweb/cts@68753bbc67e91effa0c2c804d64440350e03e21f',
+    'url': '{chromium_git}/external/github.com/gpuweb/cts@3f94329188723ae92fc1bdefbcacd659fed2aa8b',
     'condition': 'build_with_chromium',
   },
 

@@ -122,6 +122,13 @@ class MatrixVectorMultiplyPerf : public DawnPerfTestWithParams<MatrixVectorMulti
 };
 
 void MatrixVectorMultiplyPerf::SetUp() {
+    // TODO(crbug.com/dawn/2508): Fails due to an OS/driver upgrade on Linux/Intel.
+    // Can't specify IsIntel() since this fails with llvmpipe, where IsIntel() is
+    // false. This must also be checked before SetUp() since the crash happens in
+    // SetUp() itself.
+    DAWN_SUPPRESS_TEST_IF(IsLinux() && IsVulkan() && IsMesa("23.2.1") &&
+                          GetParam().mStoreType == StoreType::F32);
+
     DawnPerfTestWithParams<MatrixVectorMultiplyParams>::SetUp();
 
     // Unoptimized variant too slow for bots.

@@ -124,8 +124,8 @@ Return FindStorageBufferBindingAliasing(const PipelineLayoutBase* pipelineLayout
         for (BindingIndex bindingIndex{0}; bindingIndex < bgl->GetBufferCount(); ++bindingIndex) {
             const BindingInfo& bindingInfo = bgl->GetBindingInfo(bindingIndex);
             // Buffer bindings are sorted to have smallest of bindingIndex.
-            const BufferBindingLayout& layout =
-                std::get<BufferBindingLayout>(bindingInfo.bindingLayout);
+            const BufferBindingInfo& layout =
+                std::get<BufferBindingInfo>(bindingInfo.bindingLayout);
 
             // BindGroup validation already guarantees the buffer usage includes
             // wgpu::BufferUsage::Storage
@@ -163,8 +163,7 @@ Return FindStorageBufferBindingAliasing(const PipelineLayoutBase* pipelineLayout
              bindingIndex < bgl->GetBindingCount(); ++bindingIndex) {
             const BindingInfo& bindingInfo = bgl->GetBindingInfo(bindingIndex);
 
-            const auto* layout =
-                std::get_if<StorageTextureBindingLayout>(&bindingInfo.bindingLayout);
+            const auto* layout = std::get_if<StorageTextureBindingInfo>(&bindingInfo.bindingLayout);
             if (layout == nullptr) {
                 continue;
             }
@@ -362,8 +361,8 @@ MaybeError CommandBufferStateTracker::ValidateNoDifferentTextureViewsOnSameTextu
 
         for (BindingIndex bindingIndex{0}; bindingIndex < bgl->GetBindingCount(); ++bindingIndex) {
             const BindingInfo& bindingInfo = bgl->GetBindingInfo(bindingIndex);
-            if (!std::holds_alternative<TextureBindingLayout>(bindingInfo.bindingLayout) &&
-                !std::holds_alternative<StorageTextureBindingLayout>(bindingInfo.bindingLayout)) {
+            if (!std::holds_alternative<TextureBindingInfo>(bindingInfo.bindingLayout) &&
+                !std::holds_alternative<StorageTextureBindingInfo>(bindingInfo.bindingLayout)) {
                 continue;
             }
 
@@ -676,7 +675,7 @@ MaybeError CommandBufferStateTracker::CheckMissingAspects(ValidationAspects aspe
                     mBindgroups[i]->GetUnverifiedBufferSizes()[packedIndex.value()];
                 uint64_t minBufferSize = (*mMinBufferSizes)[i][packedIndex.value()];
 
-                const auto& layout = std::get<BufferBindingLayout>(bindingInfo.bindingLayout);
+                const auto& layout = std::get<BufferBindingInfo>(bindingInfo.bindingLayout);
                 return DAWN_VALIDATION_ERROR(
                     "%s bound with size %u at group %u, binding %u is too small. The pipeline (%s) "
                     "requires a buffer binding which is at least %u bytes.%s",
