@@ -99,6 +99,16 @@ void Client::DestroyAllObjects() {
     }
 }
 
+ReservedBuffer Client::ReserveBuffer(WGPUDevice device, const WGPUBufferDescriptor* descriptor) {
+    Buffer* buffer = Make<Buffer>(FromAPI(device)->GetEventManagerHandle(), descriptor);
+
+    ReservedBuffer result;
+    result.buffer = ToAPI(buffer);
+    result.handle = buffer->GetWireHandle();
+    result.deviceHandle = FromAPI(device)->GetWireHandle();
+    return result;
+}
+
 ReservedTexture Client::ReserveTexture(WGPUDevice device, const WGPUTextureDescriptor* descriptor) {
     Texture* texture = Make<Texture>(descriptor);
 
@@ -137,6 +147,10 @@ ReservedInstance Client::ReserveInstance(const WGPUInstanceDescriptor* descripto
     return result;
 }
 
+void Client::ReclaimBufferReservation(const ReservedBuffer& reservation) {
+    Free(FromAPI(reservation.buffer));
+}
+
 void Client::ReclaimTextureReservation(const ReservedTexture& reservation) {
     Free(FromAPI(reservation.texture));
 }
@@ -173,7 +187,7 @@ void Client::Disconnect() {
         for (LinkNode<ObjectBase>* device = deviceList.head(); device != deviceList.end();
              device = device->next()) {
             static_cast<Device*>(device->value())
-                ->HandleDeviceLost(WGPUDeviceLostReason_Undefined, "GPU connection lost");
+                ->HandleDeviceLost(WGPUDeviceLostReason_Unknown, "GPU connection lost");
         }
     }
     for (auto& objectList : mObjects) {

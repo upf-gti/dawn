@@ -35,6 +35,7 @@
 #include "src/tint/lang/core/ir/validator.h"
 #include "src/tint/lang/wgsl/builtin_fn.h"
 #include "src/tint/lang/wgsl/ir/builtin_call.h"
+#include "src/tint/utils/ice/ice.h"
 
 namespace tint::wgsl::reader {
 namespace {
@@ -166,10 +167,14 @@ core::BuiltinFn Convert(wgsl::BuiltinFn fn) {
         CASE(kAtomicCompareExchangeWeak)
         CASE(kSubgroupBallot)
         CASE(kSubgroupBroadcast)
-        default:
-            TINT_ICE() << "unhandled builtin function: " << fn;
-            return core::BuiltinFn::kNone;
+
+        case tint::wgsl::BuiltinFn::kBitcast:               // should lower to ir::Bitcast
+        case tint::wgsl::BuiltinFn::kWorkgroupUniformLoad:  // should be handled in Lower()
+        case tint::wgsl::BuiltinFn::kTintMaterialize:
+        case tint::wgsl::BuiltinFn::kNone:
+            break;
     }
+    TINT_ICE() << "unhandled builtin function: " << fn;
 }
 
 }  // namespace
@@ -193,19 +198,16 @@ Result<SuccessType> Lower(core::ir::Module& mod) {
                     //    call workgroupBarrier
                     b.InsertBefore(call, [&] {
                         b.Call(ty.void_(), core::BuiltinFn::kWorkgroupBarrier);
-                        auto* load = b.Load(call->Args()[0]);
-                        call->Result(0)->ReplaceAllUsesWith(load->Result(0));
+                        b.LoadWithResult(call->DetachResult(), call->Args()[0]);
                         b.Call(ty.void_(), core::BuiltinFn::kWorkgroupBarrier);
                     });
                     break;
                 }
                 default: {
                     Vector<core::ir::Value*, 8> args(call->Args());
-                    auto* replacement =
-                        mod.allocators.instructions.Create<core::ir::CoreBuiltinCall>(
-                            call->Result(0), Convert(call->Func()), std::move(args));
+                    auto* replacement = b.CallWithResult(call->DetachResult(),
+                                                         Convert(call->Func()), std::move(args));
                     call->ReplaceWith(replacement);
-                    call->ClearResults();
                     break;
                 }
             }

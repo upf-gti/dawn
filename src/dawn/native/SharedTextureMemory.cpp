@@ -54,6 +54,7 @@ class ErrorSharedTextureMemory : public SharedTextureMemoryBase {
         DAWN_UNREACHABLE();
     }
     ResultOrError<FenceAndSignalValue> EndAccessImpl(TextureBase* texture,
+                                                     ExecutionSerial lastUsageSerial,
                                                      UnpackedPtr<EndAccessState>& state) override {
         DAWN_UNREACHABLE();
     }
@@ -106,15 +107,28 @@ ObjectType SharedTextureMemoryBase::GetType() const {
 }
 
 void SharedTextureMemoryBase::APIGetProperties(SharedTextureMemoryProperties* properties) const {
+    if (GetDevice()->ConsumedError(GetProperties(properties), "calling %s.GetProperties", this)) {
+        return;
+    }
+}
+
+MaybeError SharedTextureMemoryBase::GetProperties(SharedTextureMemoryProperties* properties) const {
     properties->usage = mProperties.usage;
     properties->size = mProperties.size;
     properties->format = mProperties.format;
 
     UnpackedPtr<SharedTextureMemoryProperties> unpacked;
-    if (GetDevice()->ConsumedError(ValidateAndUnpack(properties), &unpacked,
-                                   "calling %s.GetProperties", this)) {
-        return;
+    DAWN_TRY_ASSIGN(unpacked, ValidateAndUnpack(properties));
+
+    if (unpacked.Get<SharedTextureMemoryAHardwareBufferProperties>()) {
+        DAWN_INVALID_IF(
+            !GetDevice()->HasFeature(Feature::SharedTextureMemoryAHardwareBuffer),
+            "SharedTextureMemory properties (%s) have a chained "
+            "SharedTextureMemoryAHardwareBufferProperties without the %s feature being set.",
+            this, ToAPI(Feature::SharedTextureMemoryAHardwareBuffer));
     }
+
+    return {};
 }
 
 TextureBase* SharedTextureMemoryBase::APICreateTexture(const TextureDescriptor* descriptor) {
@@ -152,8 +166,6 @@ ResultOrError<Ref<TextureBase>> SharedTextureMemoryBase::CreateTexture(
                     wgpu::TextureDimension::e2D);
     DAWN_INVALID_IF(descriptor->mipLevelCount != 1, "Mip level count (%u) is not 1.",
                     descriptor->mipLevelCount);
-    DAWN_INVALID_IF(descriptor->size.depthOrArrayLayers != 1, "Array layer count (%u) is not 1.",
-                    descriptor->size.depthOrArrayLayers);
     DAWN_INVALID_IF(descriptor->sampleCount != 1, "Sample count (%u) is not 1.",
                     descriptor->sampleCount);
 
@@ -178,7 +190,7 @@ ResultOrError<Ref<TextureBase>> SharedTextureMemoryBase::CreateTexture(
     Ref<TextureBase> texture;
     DAWN_TRY_ASSIGN(texture, CreateTextureImpl(descriptor));
     // Access is started on memory.BeginAccess.
-    texture->SetHasAccess(false);
+    texture->OnEndAccess();
     return texture;
 }
 

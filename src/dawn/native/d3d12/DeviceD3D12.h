@@ -139,19 +139,6 @@ class Device final : public d3d::Device {
 
     MutexProtected<StagingDescriptorAllocator>& GetDepthStencilViewAllocator() const;
 
-    ResultOrError<FenceAndSignalValue> CreateFence(
-        const d3d::ExternalImageDXGIFenceDescriptor* descriptor) override;
-
-    ResultOrError<std::unique_ptr<d3d::ExternalImageDXGIImpl>> CreateExternalImageDXGIImplImpl(
-        const ExternalImageDescriptor* descriptor) override;
-
-    Ref<TextureBase> CreateD3DExternalTexture(const UnpackedPtr<TextureDescriptor>& descriptor,
-                                              ComPtr<IUnknown> d3dTexture,
-                                              Ref<d3d::KeyedMutex> keyedMutex,
-                                              std::vector<FenceAndSignalValue> waitFences,
-                                              bool isSwapChainTexture,
-                                              bool isInitialized) override;
-
     void DisposeKeyedMutex(ComPtr<IDXGIKeyedMutex> dxgiKeyedMutex) override;
 
     MaybeError ImportSharedHandleResource(HANDLE handle,
@@ -214,7 +201,7 @@ class Device final : public d3d::Device {
         const UnpackedPtr<TextureDescriptor>& descriptor) override;
     ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
         TextureBase* texture,
-        const TextureViewDescriptor* descriptor) override;
+        const UnpackedPtr<TextureViewDescriptor>& descriptor) override;
     Ref<ComputePipelineBase> CreateUninitializedComputePipelineImpl(
         const UnpackedPtr<ComputePipelineDescriptor>& descriptor) override;
     Ref<RenderPipelineBase> CreateUninitializedRenderPipelineImpl(

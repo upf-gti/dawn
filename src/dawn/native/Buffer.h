@@ -102,9 +102,11 @@ class BufferBase : public SharedResource {
     bool IsFullBufferRange(uint64_t offset, uint64_t size) const;
     bool NeedsInitialization() const;
     void MarkUsedInPendingCommands();
+    virtual MaybeError UploadData(uint64_t bufferOffset, const void* data, size_t size);
 
     // SharedResource impl.
-    void SetHasAccess(bool hasAccess) override;
+    ExecutionSerial OnEndAccess() override;
+    void OnBeginAccess() override;
     bool HasAccess() const override;
     bool IsDestroyed() const override;
     void SetInitialized(bool initialized) override;

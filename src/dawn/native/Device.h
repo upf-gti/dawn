@@ -38,6 +38,8 @@
 #include "absl/container/flat_hash_set.h"
 #include "dawn/common/ContentLessObjectCache.h"
 #include "dawn/common/Mutex.h"
+#include "dawn/common/NonMovable.h"
+#include "dawn/common/StackAllocated.h"
 #include "dawn/native/CacheKey.h"
 #include "dawn/native/Commands.h"
 #include "dawn/native/ComputePipeline.h"
@@ -124,7 +126,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     // users as the respective error rather than causing a device loss instead.
     void HandleError(std::unique_ptr<ErrorData> error,
                      InternalErrorType additionalAllowedErrors = InternalErrorType::None,
-                     WGPUDeviceLostReason lost_reason = WGPUDeviceLostReason_Undefined);
+                     WGPUDeviceLostReason lost_reason = WGPUDeviceLostReason_Unknown);
 
     MaybeError ValidateObject(const ApiObjectBase* object) const;
 
@@ -173,10 +175,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
 
     BindGroupLayoutBase* GetEmptyBindGroupLayout();
     PipelineLayoutBase* GetEmptyPipelineLayout();
-
-    ResultOrError<Ref<TextureViewBase>> CreateImplicitMSAARenderTextureViewFor(
-        const TextureViewBase* singleSampledTexture,
-        uint32_t sampleCount);
 
     ResultOrError<Ref<TextureViewBase>> GetOrCreatePlaceholderTextureViewForExternalTexture();
 
@@ -303,6 +301,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     void APIPushErrorScope(wgpu::ErrorFilter filter);
     void APIPopErrorScope(wgpu::ErrorCallback callback, void* userdata);
     Future APIPopErrorScopeF(const PopErrorScopeCallbackInfo& callbackInfo);
+    Future APIPopErrorScope2(const WGPUPopErrorScopeCallbackInfo2& callbackInfo);
 
     MaybeError ValidateIsAlive() const;
 
@@ -358,8 +357,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
 
     size_t GetLazyClearCountForTesting();
     void IncrementLazyClearCountForTesting();
-    size_t GetDeprecationWarningCountForTesting();
-    void EmitDeprecationWarning(const std::string& warning);
     void EmitWarningOnce(const std::string& message);
     void EmitLog(const char* message);
     void EmitLog(WGPULoggingType loggingType, const char* message);
@@ -495,7 +492,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
         const UnpackedPtr<TextureDescriptor>& descriptor) = 0;
     virtual ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
         TextureBase* texture,
-        const TextureViewDescriptor* descriptor) = 0;
+        const UnpackedPtr<TextureViewDescriptor>& descriptor) = 0;
     virtual Ref<ComputePipelineBase> CreateUninitializedComputePipelineImpl(
         const UnpackedPtr<ComputePipelineDescriptor>& descriptor) = 0;
     virtual Ref<RenderPipelineBase> CreateUninitializedRenderPipelineImpl(
@@ -573,8 +570,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     std::unique_ptr<DynamicUploader> mDynamicUploader;
     Ref<QueueBase> mQueue;
 
-    struct DeprecationWarnings;
-    std::unique_ptr<DeprecationWarnings> mDeprecationWarnings;
     std::atomic<uint32_t> mEmittedCompilationLogCount = 0;
 
     absl::flat_hash_set<std::string> mWarnings;
@@ -623,15 +618,12 @@ ResultOrError<Ref<PipelineLayoutBase>> ValidateLayoutAndGetRenderPipelineDescrip
     const RenderPipelineDescriptor& descriptor,
     RenderPipelineDescriptor* outDescriptor);
 
-class IgnoreLazyClearCountScope : public NonMovable {
+class IgnoreLazyClearCountScope : public NonMovable, public StackAllocated {
   public:
     explicit IgnoreLazyClearCountScope(DeviceBase* device);
     ~IgnoreLazyClearCountScope();
 
   private:
-    // Disable heap allocation
-    void* operator new(size_t) = delete;
-
     raw_ptr<DeviceBase> mDevice;
     size_t mLazyClearCountForTesting;
 };

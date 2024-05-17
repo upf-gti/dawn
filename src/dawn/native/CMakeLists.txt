@@ -261,6 +261,7 @@ target_link_libraries(dawn_native
             absl_str_format_internal
             absl_flat_hash_map
             absl_flat_hash_set
+            absl_inlined_vector
 )
 
 target_include_directories(dawn_native PRIVATE ${DAWN_ABSEIL_DIR})
@@ -312,8 +313,6 @@ if (DAWN_ENABLE_D3D11 OR DAWN_ENABLE_D3D12)
         "d3d/D3DError.h"
         "d3d/DeviceD3D.cpp"
         "d3d/DeviceD3D.h"
-        "d3d/ExternalImageDXGIImpl.cpp"
-        "d3d/ExternalImageDXGIImpl.h"
         "d3d/Forward.h"
         "d3d/KeyedMutex.cpp"
         "d3d/KeyedMutex.h"
@@ -507,6 +506,8 @@ if (DAWN_ENABLE_METAL)
         "metal/DeviceMTL.h"
         "metal/DeviceMTL.mm"
         "metal/Forward.h"
+        "metal/PhysicalDeviceMTL.h"
+        "metal/PhysicalDeviceMTL.mm"
         "metal/PipelineLayoutMTL.h"
         "metal/PipelineLayoutMTL.mm"
         "metal/QueueMTL.h"
@@ -581,6 +582,7 @@ if (DAWN_ENABLE_OPENGL)
         "opengl/BindGroupGL.h"
         "opengl/BindGroupLayoutGL.cpp"
         "opengl/BindGroupLayoutGL.h"
+        "opengl/BindingPoint.h"
         "opengl/BufferGL.cpp"
         "opengl/BufferGL.h"
         "opengl/CommandBufferGL.cpp"

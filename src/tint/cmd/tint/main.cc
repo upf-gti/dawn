@@ -43,7 +43,7 @@
 #include "src/tint/api/tint.h"
 #include "src/tint/cmd/common/generate_external_texture_bindings.h"
 #include "src/tint/cmd/common/helper.h"
-#include "src/tint/lang/core/ir/disassembler.h"
+#include "src/tint/lang/core/ir/disassembly.h"
 #include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/wgsl/ast/module.h"
 #include "src/tint/lang/wgsl/ast/transform/first_index_offset.h"
@@ -68,6 +68,11 @@
 #if TINT_BUILD_WGSL_READER
 #include "src/tint/lang/wgsl/reader/program_to_ir/program_to_ir.h"
 #include "src/tint/lang/wgsl/reader/reader.h"
+
+#if TINT_BUILD_IR_BINARY
+#include "src/tint/lang/core/ir/binary/encode.h"
+#endif  // TINT_BUILD_IR_BINARY
+
 #endif  // TINT_BUILD_WGSL_READER
 
 #if TINT_BUILD_SPV_WRITER
@@ -99,6 +104,14 @@
 #include "src/tint/lang/glsl/validate/validate.h"
 #endif  // TINT_BUILD_GLSL_VALIDATOR
 
+#if TINT_BUILD_WGSL_READER
+#define WGSL_READER_ONLY(x) x
+#else
+#define WGSL_READER_ONLY(x)
+#endif
+
+#define WGSL_READER_AND_IR_BINARY (TINT_BUILD_WGSL_READER && TINT_BUILD_IR_BINARY)
+
 #if TINT_BUILD_SPV_WRITER
 #define SPV_WRITER_ONLY(x) x
 #else
@@ -129,6 +142,12 @@
 #define GLSL_WRITER_ONLY(x)
 #endif
 
+#if WGSL_READER_AND_IR_BINARY
+#define WGSL_READER_AND_IR_BINARY_ONLY(x) x
+#else
+#define WGSL_READER_AND_IR_BINARY_ONLY(x)
+#endif
+
 namespace {
 
 /// Prints the given hash value in a format string that the end-to-end test runner can parse.
@@ -145,6 +164,8 @@ enum class Format : uint8_t {
     kMsl,
     kHlsl,
     kGlsl,
+    kIr,
+    kIrBin
 };
 
 #if TINT_BUILD_HLSL_WRITER
@@ -209,6 +230,7 @@ struct Options {
 #endif  // TINT_BUILD_HLSL_WRITER
 
     bool dump_ir = false;
+    bool dump_ir_bin = false;
     bool use_ir = false;
     bool use_ir_reader = false;
 
@@ -278,6 +300,12 @@ Format InferFormat(const std::string& filename) {
     }
 #endif  // TINT_BUILD_HLSL_WRITER
 
+#if WGSL_READER_AND_IR_BINARY
+    if (tint::HasSuffix(filename, ".tirb")) {
+        return Format::kIrBin;
+    }
+#endif  // WGSL_READER_AND_IR_BINARY
+
     return Format::kUnknown;
 }
 
@@ -296,6 +324,8 @@ bool ParseArgs(tint::VectorRef<std::string_view> arguments,
     MSL_WRITER_ONLY(format_enum_names.Emplace(Format::kMsl, "msl"));
     HLSL_WRITER_ONLY(format_enum_names.Emplace(Format::kHlsl, "hlsl"));
     GLSL_WRITER_ONLY(format_enum_names.Emplace(Format::kGlsl, "glsl"));
+    WGSL_READER_ONLY(format_enum_names.Emplace(Format::kIr, "ir"));
+    WGSL_READER_AND_IR_BINARY_ONLY(format_enum_names.Emplace(Format::kIrBin, "ir_bin"));
 
     OptionSet options;
     auto& fmt = options.Add<EnumOption<Format>>("format",
@@ -305,7 +335,8 @@ If not provided, will be inferred from output filename extension:
   .spv    -> spirv
   .wgsl   -> wgsl
   .metal  -> msl
-  .hlsl   -> hlsl)",
+  .hlsl   -> hlsl)" WGSL_READER_AND_IR_BINARY_ONLY(R"(
+  .tirb  -> ir binary protobuf)"),
                                                 format_enum_names, ShortName{"f"});
     TINT_DEFER(opts->format = fmt.value.value_or(Format::kUnknown));
 
@@ -361,6 +392,11 @@ When specified, automatically enables MSL validation)",
     auto& dump_ir = options.Add<BoolOption>("dump-ir", "Writes the IR to stdout", Alias{"emit-ir"},
                                             Default{false});
     TINT_DEFER(opts->dump_ir = *dump_ir.value);
+
+    auto& dump_ir_bin = options.Add<BoolOption>(
+        "dump-ir-bin", "Writes the IR as a human readable protobuf to stdout", Alias{"emit-ir-bin"},
+        Default{false});
+    TINT_DEFER(opts->dump_ir_bin = *dump_ir_bin.value);
 
     auto& use_ir = options.Add<BoolOption>(
         "use-ir", "Use the IR for writers and transforms when possible", Default{false});
@@ -1001,8 +1037,9 @@ bool GenerateHlsl(const tint::Program& program, const Options& options) {
         tint::hlsl::validate::Result dxc_res;
         bool dxc_found = false;
         if (options.validate || must_validate_dxc) {
-            auto dxc = tint::Command::LookPath(
-                options.dxc_path.empty() ? "dxc" : std::string(options.dxc_path));
+            auto dxc =
+                tint::Command::LookPath(options.dxc_path.empty() ? tint::hlsl::validate::kDxcDLLName
+                                                                 : std::string(options.dxc_path));
             if (dxc.Found()) {
                 dxc_found = true;
 
@@ -1045,7 +1082,7 @@ bool GenerateHlsl(const tint::Program& program, const Options& options) {
                 fxc_res.output = "FXC DLL '" + options.fxc_path + "' not found. Cannot validate";
             }
 #else
-            if (must_validate_dxc) {
+            if (must_validate_fxc) {
                 fxc_res.failed = true;
                 fxc_res.output = "FXC can only be used on Windows.";
             }
@@ -1199,6 +1236,91 @@ bool GenerateGlsl([[maybe_unused]] const tint::Program& program,
 #endif  // TINT_BUILD_GLSL_WRITER
 }
 
+/// Generate IR code for a program.
+/// @param program the program to generate
+/// @param options the options that Tint was invoked with
+/// @returns true on success
+bool GenerateIr([[maybe_unused]] const tint::Program& program,
+                [[maybe_unused]] const Options& options) {
+#if !TINT_BUILD_WGSL_READER
+    std::cerr << "WGSL reader not enabled in tint build" << std::endl;
+    return false;
+#else
+    auto result = tint::wgsl::reader::ProgramToLoweredIR(program);
+    if (result != tint::Success) {
+        std::cerr << "Failed to build IR from program: " << result.Failure() << "\n";
+        return false;
+    }
+
+    options.printer->Print(tint::core::ir::Disassemble(result.Get()).Text());
+    options.printer->Print(tint::StyledText{} << "\n");
+
+    return true;
+#endif
+}
+
+/// Generate IR binary protobuf for a program.
+/// @param program the program to generate
+/// @param options the options that Tint was invoked with
+/// @returns true on success
+bool GenerateIrProtoBinary([[maybe_unused]] const tint::Program& program,
+                           [[maybe_unused]] const Options& options) {
+#if !TINT_BUILD_WGSL_READER
+    std::cerr << "WGSL reader not enabled in tint build" << std::endl;
+    return false;
+#elif !TINT_BUILD_IR_BINARY
+    std::cerr << "IR binary not enabled in tint build" << std::endl;
+    return false;
+#else
+    auto module = tint::wgsl::reader::ProgramToLoweredIR(program);
+    if (module != tint::Success) {
+        std::cerr << "Failed to build IR from program: " << module.Failure() << "\n";
+        return false;
+    }
+    auto pb = tint::core::ir::binary::Encode(module.Get());
+    if (pb != tint::Success) {
+        std::cerr << "Failed to encode IR module to protobuf: " << pb.Failure() << "\n";
+        return false;
+    }
+
+    if (!WriteFile(options.output_file, "wb", ToStdVector(pb.Get()))) {
+        std::cerr << "Failed to write protobuf binary out to file"
+                  << "\n";
+        return false;
+    }
+
+    return true;
+#endif
+}
+
+/// Generate IR human readable protobuf for a program.
+/// @param program the program to generate
+/// @param options the options that Tint was invoked with
+/// @returns true on success
+#if WGSL_READER_AND_IR_BINARY
+bool GenerateIrProtoDebug([[maybe_unused]] const tint::Program& program,
+                          [[maybe_unused]] const Options& options) {
+    auto module = tint::wgsl::reader::ProgramToLoweredIR(program);
+    if (module != tint::Success) {
+        std::cerr << "Failed to build IR from program: " << module.Failure() << "\n";
+        return false;
+    }
+    auto pb = tint::core::ir::binary::EncodeDebug(module.Get());
+    if (pb != tint::Success) {
+        std::cerr << "Failed to encode IR module to protobuf: " << pb.Failure() << "\n";
+        return false;
+    }
+
+    if (!WriteFile(options.output_file, "w", pb.Get())) {
+        std::cerr << "Failed to write protobuf debug text out to file"
+                  << "\n";
+        return false;
+    }
+
+    return true;
+}
+#endif  // WGSL_READER_AND_IR_BINARY
+
 }  // namespace
 
 int main(int argc, const char** argv) {
@@ -1336,17 +1458,15 @@ int main(int argc, const char** argv) {
 
 #if TINT_BUILD_WGSL_READER
     if (options.dump_ir) {
-        auto result = tint::wgsl::reader::ProgramToLoweredIR(info.program);
-        if (result != tint::Success) {
-            std::cerr << "Failed to build IR from program: " << result.Failure() << "\n";
-        } else {
-            auto mod = result.Move();
-            if (options.dump_ir) {
-                std::cout << tint::core::ir::Disassemble(mod) << "\n";
-            }
-        }
+        GenerateIr(info.program, options);
     }
 #endif  // TINT_BUILD_WGSL_READER
+
+#if WGSL_READER_AND_IR_BINARY
+    if (options.dump_ir_bin) {
+        GenerateIrProtoDebug(info.program, options);
+    }
+#endif  // WGSL_READER_AND_IR_BINARY
 
     tint::inspector::Inspector inspector(info.program);
     if (options.dump_inspector_bindings) {
@@ -1454,6 +1574,12 @@ int main(int argc, const char** argv) {
             break;
         case Format::kGlsl:
             success = GenerateGlsl(program, options);
+            break;
+        case Format::kIr:
+            success = GenerateIr(program, options);
+            break;
+        case Format::kIrBin:
+            success = GenerateIrProtoBinary(program, options);
             break;
         case Format::kNone:
             break;

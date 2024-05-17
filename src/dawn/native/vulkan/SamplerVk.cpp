@@ -122,30 +122,11 @@ MaybeError Sampler::Initialize(const SamplerDescriptor* descriptor) {
     }
 
     VkSamplerYcbcrConversionInfo samplerYCbCrInfo = {};
-    if (auto* vulkanYCbCrDescriptor =
-            Unpack(descriptor).Get<vulkan::SamplerYCbCrVulkanDescriptor>()) {
-        const VkSamplerYcbcrConversionCreateInfo& vulkanYCbCrInfo =
-            vulkanYCbCrDescriptor->vulkanYCbCrInfo;
-#if DAWN_PLATFORM_IS(ANDROID)
-        const VkBaseInStructure* chain =
-            static_cast<const VkBaseInStructure*>(vulkanYCbCrInfo.pNext);
-        while (chain != nullptr) {
-            if (chain->sType == VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID) {
-                const VkExternalFormatANDROID* vkExternalFormat =
-                    reinterpret_cast<const VkExternalFormatANDROID*>(chain);
-                DAWN_INVALID_IF((vkExternalFormat->externalFormat == 0 &&
-                                 vulkanYCbCrInfo.format == VK_FORMAT_UNDEFINED),
-                                "Both VkFormat and VkExternalFormatANDROID are undefined.");
-                break;
-            }
-            chain = chain->pNext;
-        }
-#endif  // DAWN_PLATFORM_IS(ANDROID)
-
-        DAWN_TRY(CheckVkSuccess(
-            device->fn.CreateSamplerYcbcrConversion(device->GetVkDevice(), &vulkanYCbCrInfo,
-                                                    nullptr, &*mSamplerYCbCrConversion),
-            "CreateSamplerYcbcrConversion"));
+    if (auto* yCbCrVkDescriptor = Unpack(descriptor).Get<YCbCrVkDescriptor>()) {
+        mYCbCrVkDescriptor = *yCbCrVkDescriptor;
+        mYCbCrVkDescriptor.nextInChain = nullptr;
+        DAWN_TRY_ASSIGN(mSamplerYCbCrConversion,
+                        CreateSamplerYCbCrConversionCreateInfo(mYCbCrVkDescriptor, device));
 
         samplerYCbCrInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
         samplerYCbCrInfo.pNext = nullptr;

@@ -206,18 +206,6 @@ MaybeError ValidateSurfaceConfiguration(DeviceBase* device,
     DAWN_TRY_ASSIGN(format, device->GetInternalFormat(config->format));
     DAWN_ASSERT(format != nullptr);
 
-    // TODO(crbug.com/dawn/160): Lift this restriction once
-    // wgpu::Instance::GetPreferredSurfaceFormat is implemented.
-    // TODO(dawn:286):
-#if DAWN_PLATFORM_IS(ANDROID)
-    constexpr wgpu::TextureFormat kRequireSwapChainFormat = wgpu::TextureFormat::RGBA8Unorm;
-#else
-    constexpr wgpu::TextureFormat kRequireSwapChainFormat = wgpu::TextureFormat::BGRA8Unorm;
-#endif  // !DAWN_PLATFORM_IS(ANDROID)
-    DAWN_INVALID_IF(config->format != kRequireSwapChainFormat,
-                    "Format (%s) is not %s, which is (currently) the only accepted format.",
-                    config->format, kRequireSwapChainFormat);
-
     if (device->HasFeature(Feature::SurfaceCapabilities)) {
         wgpu::TextureUsage validUsage;
         DAWN_TRY_ASSIGN(validUsage, device->GetSupportedSurfaceUsage(surface));
@@ -287,7 +275,8 @@ class AdapterSurfaceCapCache {
     MaybeError WithAdapterCapabilities(AdapterBase* adapter, const Surface* surface, F f) {
         if (mCachedCapabilitiesAdapter.Promote().Get() != adapter) {
             const PhysicalDeviceBase* physicalDevice = adapter->GetPhysicalDevice();
-            DAWN_TRY_ASSIGN(mCachedCapabilities, physicalDevice->GetSurfaceCapabilities(surface));
+            DAWN_TRY_ASSIGN(mCachedCapabilities, physicalDevice->GetSurfaceCapabilities(
+                                                     adapter->GetInstance(), surface));
             mCachedCapabilitiesAdapter = GetWeakRef(adapter);
         }
         return f(mCachedCapabilities);

@@ -134,10 +134,10 @@ ResultOrError<VkImage> CreateExternalVkImage(
     createInfo.pQueueFamilyIndices = nullptr;
     createInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    PNextChainBuilder createInfoChain(&createInfo);
-
     VkExternalMemoryImageCreateInfo externalMemoryImageCreateInfo = {};
     externalMemoryImageCreateInfo.handleTypes = externalMemoryHandleTypeFlagBits;
+
+    PNextChainBuilder createInfoChain(&createInfo);
     createInfoChain.Add(&externalMemoryImageCreateInfo,
                         VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO);
 
@@ -160,20 +160,20 @@ MaybeError CheckExternalImageFormatSupport(
     VkPhysicalDeviceImageFormatInfo2* imageFormatInfo,
     VkExternalMemoryHandleTypeFlagBits externalMemoryHandleTypeFlagBits,
     AdditionalChains*... additionalChains) {
-    PNextChainBuilder imageFormatInfoChain(imageFormatInfo);
-
     VkPhysicalDeviceExternalImageFormatInfo externalImageFormatInfo = {};
     externalImageFormatInfo.handleType = externalMemoryHandleTypeFlagBits;
+
+    PNextChainBuilder imageFormatInfoChain(imageFormatInfo);
     imageFormatInfoChain.Add(&externalImageFormatInfo,
                              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO);
-
     (imageFormatInfoChain.Add(additionalChains), ...);
 
     VkImageFormatProperties2 imageFormatProps = {};
     imageFormatProps.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
-    PNextChainBuilder imageFormatPropsChain(&imageFormatProps);
 
     VkExternalImageFormatProperties externalImageFormatProps = {};
+
+    PNextChainBuilder imageFormatPropsChain(&imageFormatProps);
     imageFormatPropsChain.Add(&externalImageFormatProps,
                               VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES);
 
@@ -386,8 +386,7 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
     // Don't add the view format if backend validation is enabled, otherwise most image creations
     // will fail with VVL. This view format is only needed for sRGB reinterpretation.
     // TODO(crbug.com/dawn/2304): Investigate if this is a bug in VVL.
-    if (addViewFormats &&
-        !device->GetPhysicalDevice()->GetInstance()->IsBackendValidationEnabled()) {
+    if (addViewFormats && !device->GetAdapter()->GetInstance()->IsBackendValidationEnabled()) {
         DAWN_ASSERT(compatibleViewFormats.size() == 1u);
         viewFormats[imageFormatListInfo.viewFormatCount++] =
             VulkanImageFormat(device, compatibleViewFormats[0]->format);
@@ -487,7 +486,8 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
     const char* label,
     const SharedTextureMemoryAHardwareBufferDescriptor* descriptor) {
 #if DAWN_PLATFORM_IS(ANDROID)
-    const auto* ahbFunctions = device->GetInstance()->GetOrLoadAHBFunctions();
+    const auto* ahbFunctions =
+        ToBackend(device->GetAdapter()->GetPhysicalDevice())->GetOrLoadAHBFunctions();
     VkDevice vkDevice = device->GetVkDevice();
 
     auto* aHardwareBuffer = static_cast<struct AHardwareBuffer*>(descriptor->handle);
@@ -517,9 +517,8 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
 
     // Query the properties to find the appropriate VkFormat and memory type.
     {
-        PNextChainBuilder bufferPropertiesChain(&bufferProperties);
-
         VkAndroidHardwareBufferFormatPropertiesANDROID bufferFormatProperties;
+        PNextChainBuilder bufferPropertiesChain(&bufferProperties);
         bufferPropertiesChain.Add(
             &bufferFormatProperties,
             VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID);
@@ -665,20 +664,11 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
         dedicatedAllocateInfo.image = sharedTextureMemory->mVkImage->Get();
         dedicatedAllocateInfo.buffer = VkBuffer{};
 
-        // Add a reference because we will transfer ownership to the
-        // VkDeviceMemory.
-        ahbFunctions->Acquire(aHardwareBuffer);
-
         // Import the AHardwareBuffer as VkDeviceMemory
         VkDeviceMemory vkDeviceMemory;
-        DAWN_TRY_ASSIGN_WITH_CLEANUP(
-            vkDeviceMemory,
-            AllocateDeviceMemory(device, &memoryAllocateInfo, &dedicatedAllocateInfo,
-                                 &importMemoryAHBInfo),
-            {
-                // Release the reference because the VkDeviceMemory did not take ownership of it.
-                ahbFunctions->Release(aHardwareBuffer);
-            });
+        DAWN_TRY_ASSIGN(vkDeviceMemory,
+                        AllocateDeviceMemory(device, &memoryAllocateInfo, &dedicatedAllocateInfo,
+                                             &importMemoryAHBInfo));
 
         sharedTextureMemory->mVkDeviceMemory =
             AcquireRef(new RefCountedVkHandle<VkDeviceMemory>(device, vkDeviceMemory));
@@ -981,6 +971,7 @@ MaybeError SharedTextureMemory::BeginAccessImpl(
 #if DAWN_PLATFORM_IS(FUCHSIA) || DAWN_PLATFORM_IS(LINUX)
 ResultOrError<FenceAndSignalValue> SharedTextureMemory::EndAccessImpl(
     TextureBase* texture,
+    ExecutionSerial lastUsageSerial,
     UnpackedPtr<EndAccessState>& state) {
     wgpu::SType type;
     DAWN_TRY_ASSIGN(type,
@@ -1052,6 +1043,7 @@ ResultOrError<FenceAndSignalValue> SharedTextureMemory::EndAccessImpl(
 
 ResultOrError<FenceAndSignalValue> SharedTextureMemory::EndAccessImpl(
     TextureBase* texture,
+    ExecutionSerial lastUsageSerial,
     UnpackedPtr<EndAccessState>& state) {
     return DAWN_VALIDATION_ERROR("No shared fence features supported.");
 }

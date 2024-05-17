@@ -325,8 +325,8 @@ dawn_test("dawn_unittests") {
     "unittests/BuddyMemoryAllocatorTests.cpp",
     "unittests/ChainUtilsTests.cpp",
     "unittests/CommandAllocatorTests.cpp",
-    "unittests/ConcurrentCacheTests.cpp",
     "unittests/ContentLessObjectCacheTests.cpp",
+    "unittests/DefaultTests.cpp",
     "unittests/EnumClassBitmasksTests.cpp",
     "unittests/EnumMaskIteratorTests.cpp",
     "unittests/EnumeratorTests.cpp",
@@ -355,7 +355,6 @@ dawn_test("dawn_unittests") {
     "unittests/SerialMapTests.cpp",
     "unittests/SerialQueueTests.cpp",
     "unittests/SlabAllocatorTests.cpp",
-    "unittests/StackContainerTests.cpp",
     "unittests/SubresourceStorageTests.cpp",
     "unittests/SystemUtilsTests.cpp",
     "unittests/ToBackendTests.cpp",
@@ -436,6 +435,7 @@ dawn_test("dawn_unittests") {
     "unittests/wire/WireExtensionTests.cpp",
     "unittests/wire/WireFutureTest.cpp",
     "unittests/wire/WireFutureTest.h",
+    "unittests/wire/WireInjectBufferTests.cpp",
     "unittests/wire/WireInjectInstanceTests.cpp",
     "unittests/wire/WireInjectSwapChainTests.cpp",
     "unittests/wire/WireInjectTextureTests.cpp",
@@ -464,7 +464,7 @@ dawn_test("dawn_unittests") {
   }
 
   if (dawn_enable_vulkan) {
-    sources += [ "unittests/validation/YCbCrSamplerValidationTests.cpp" ]
+    sources += [ "unittests/validation/YCbCrInfoValidationTests.cpp" ]
   }
 
   # When building inside Chromium, use their gtest main function because it is
@@ -682,10 +682,7 @@ source_set("end2end_tests_sources") {
       "dxgi.lib",
     ]
 
-    sources += [
-      "end2end/D3DResourceWrappingTests.cpp",
-      "end2end/VideoViewsTests_win.cpp",
-    ]
+    sources += [ "end2end/VideoViewsTests_win.cpp" ]
   }
 
   if (dawn_enable_d3d12) {
@@ -724,7 +721,7 @@ source_set("end2end_tests_sources") {
   }
 
   if (dawn_enable_vulkan) {
-    sources += [ "end2end/YCbCrSamplerTests.cpp" ]
+    sources += [ "end2end/YCbCrInfoTests.cpp" ]
   }
 
   if (dawn_enable_d3d11 || dawn_enable_d3d12 ||

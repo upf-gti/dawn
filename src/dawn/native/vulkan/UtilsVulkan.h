@@ -31,10 +31,10 @@
 #include <string>
 #include <vector>
 
+#include "dawn/common/StackAllocated.h"
 #include "dawn/common/vulkan_platform.h"
 #include "dawn/native/Commands.h"
 #include "dawn/native/dawn_platform.h"
-#include "partition_alloc/pointers/raw_ptr.h"
 
 namespace dawn::native {
 struct ProgrammableStage;
@@ -68,7 +68,12 @@ struct VulkanFunctions;
 //     featuresChain.Add(&featuresExtensions.subgroupSizeControl,
 //                       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT);
 //
-struct PNextChainBuilder {
+// Note:
+//   The build option `use_asan_unowned_ptr` checks the pointer to the current
+//   tail it is not dangling. So every structs in the chain must be declared
+//   before `PNextChainBuilder`.
+//
+struct PNextChainBuilder : public StackAllocated {
     // Constructor takes the address of a Vulkan structure instance, and
     // walks its pNext chain to record the current location of its tail.
     //
@@ -178,6 +183,11 @@ ResultOrError<VkDrmFormatModifierPropertiesEXT> GetFormatModifierProps(
     VkPhysicalDevice vkPhysicalDevice,
     VkFormat format,
     uint64_t modifier);
+
+ResultOrError<VkSamplerYcbcrConversion> CreateSamplerYCbCrConversionCreateInfo(
+    YCbCrVkDescriptor yCbCrDescriptor,
+    Device* device);
+
 }  // namespace dawn::native::vulkan
 
 #endif  // SRC_DAWN_NATIVE_VULKAN_UTILSVULKAN_H_

@@ -124,11 +124,11 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
             s->Append(absl::StrFormat(*fmt, static_cast<uint32_t>(value.binding), value.visibility,
                                       BindingInfoType::Buffer, layout));
         },
-        [&](const SamplerBindingLayout& layout) {
+        [&](const SamplerBindingInfo& layout) {
             s->Append(absl::StrFormat(*fmt, static_cast<uint32_t>(value.binding), value.visibility,
                                       BindingInfoType::Sampler, layout));
         },
-        [&](const StaticSamplerHolderBindingLayout& layout) {
+        [&](const StaticSamplerBindingInfo& layout) {
             s->Append(absl::StrFormat(*fmt, static_cast<uint32_t>(value.binding), value.visibility,
                                       BindingInfoType::StaticSampler, layout));
         },
@@ -195,6 +195,30 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
 }
 
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const SamplerBindingInfo& value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    s->Append(absl::StrFormat("{type: %s}", value.type));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const SamplerBindingLayout& value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    SamplerBindingInfo info(value);
+    return AbslFormatConvert(info, spec, s);
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const StaticSamplerBindingInfo& value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    s->Append(absl::StrFormat("{sampler: %s}", value.sampler.Get()));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
     const ImageCopyTexture* value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s) {
@@ -234,15 +258,6 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
         s->Append(" (defaulted)");
     }
     s->Append("]");
-    return {true};
-}
-
-absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
-    const StaticSamplerHolderBindingLayout& value,
-    const absl::FormatConversionSpec& spec,
-    absl::FormatSink* s) {
-    s->Append(
-        absl::StrFormat("{type: StaticSamplerBindingLayout, sampler: %s}", value.sampler.Get()));
     return {true};
 }
 
@@ -310,7 +325,7 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
         return {true};
     }
 
-    s->Append("{ colorFormats: [");
+    s->Append("{ colorTargets: [");
 
     ColorAttachmentIndex nextColorIndex{};
 
@@ -321,12 +336,18 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
         }
 
         while (nextColorIndex < i) {
-            s->Append(absl::StrFormat("%s, ", wgpu::TextureFormat::Undefined));
+            s->Append(absl::StrFormat("{format: %s}, ", wgpu::TextureFormat::Undefined));
             nextColorIndex++;
             needsComma = false;
         }
 
-        s->Append(absl::StrFormat("%s", value->GetColorAttachmentFormat(i)));
+        s->Append(absl::StrFormat("{format:%s", value->GetColorAttachmentFormat(i)));
+
+        if (value->GetDevice()->HasFeature(Feature::DawnLoadResolveTexture)) {
+            s->Append(absl::StrFormat(", expandResolveTexture:%v",
+                                      value->GetExpandResolveUsingAttachmentsMask().test(i)));
+        }
+        s->Append("}");
 
         nextColorIndex++;
         needsComma = true;
@@ -339,11 +360,6 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     }
 
     s->Append(absl::StrFormat("sampleCount: %u", value->GetSampleCount()));
-
-    if (value->GetDevice()->HasFeature(Feature::MSAARenderToSingleSampled)) {
-        s->Append(absl::StrFormat(", msaaRenderToSingleSampled: %d",
-                                  value->IsMSAARenderToSingleSampledEnabled()));
-    }
 
     if (value->HasPixelLocalStorage()) {
         const std::vector<wgpu::TextureFormat>& plsSlots = value->GetStorageAttachmentSlots();

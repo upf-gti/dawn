@@ -68,6 +68,7 @@
 #include "src/tint/lang/core/ir/user_call.h"
 #include "src/tint/lang/core/ir/validator.h"
 #include "src/tint/lang/core/ir/var.h"
+#include "src/tint/lang/core/texel_format.h"
 #include "src/tint/lang/core/type/atomic.h"
 #include "src/tint/lang/core/type/depth_multisampled_texture.h"
 #include "src/tint/lang/core/type/depth_texture.h"
@@ -75,7 +76,10 @@
 #include "src/tint/lang/core/type/pointer.h"
 #include "src/tint/lang/core/type/reference.h"
 #include "src/tint/lang/core/type/sampler.h"
+#include "src/tint/lang/core/type/storage_texture.h"
 #include "src/tint/lang/core/type/texture.h"
+#include "src/tint/lang/core/type/type.h"
+#include "src/tint/lang/wgsl/ast/type.h"
 #include "src/tint/lang/wgsl/ir/builtin_call.h"
 #include "src/tint/lang/wgsl/ir/unary.h"
 #include "src/tint/lang/wgsl/program/program_builder.h"
@@ -245,7 +249,6 @@ class State {
                         break;
                     default:
                         TINT_UNIMPLEMENTED() << builtin.value();
-                        break;
                 }
             }
             if (auto loc = param->Location()) {
@@ -299,7 +302,6 @@ class State {
                     break;
                 default:
                     TINT_UNIMPLEMENTED() << builtin.value();
-                    break;
             }
         }
         if (auto loc = fn->ReturnLocation()) {
@@ -540,7 +542,6 @@ class State {
         // Return has arguments - this is the return value.
         if (ret->Args().Length() != 1) {
             TINT_ICE() << "expected 1 value for return, got " << ret->Args().Length();
-            return;
         }
 
         Append(b.Return(Expr(ret->Args().Front())));
@@ -682,7 +683,6 @@ class State {
                 break;
             default:
                 TINT_UNIMPLEMENTED() << u->Op();
-                break;
         }
         Bind(u->Result(0), expr);
     }
@@ -708,7 +708,7 @@ class State {
                 [&](const core::type::Struct* s) {
                     if (auto* c = index->As<core::ir::Constant>()) {
                         auto i = c->Value()->ValueAs<uint32_t>();
-                        TINT_ASSERT_OR_RETURN(i < s->Members().Length());
+                        TINT_ASSERT(i < s->Members().Length());
                         auto* member = s->Members()[i];
                         obj_ty = member->Type();
                         expr = b.MemberAccessor(expr, member->Name().NameView());
@@ -727,7 +727,6 @@ class State {
         for (uint32_t i : s->Indices()) {
             if (TINT_UNLIKELY(i >= 4)) {
                 TINT_ICE() << "invalid swizzle index: " << i;
-                return;
             }
             components.Push("xyzw"[i]);
         }
@@ -819,7 +818,6 @@ class State {
                 if (TINT_UNLIKELY(!lookup)) {
                     TINT_ICE() << "Expr(" << (value ? value->TypeInfo().name : "null")
                                << ") value has no expression";
-                    return nullptr;
                 }
                 return std::visit(
                     [&](auto&& got) -> const ast::Expression* {
@@ -948,7 +946,6 @@ class State {
                 auto count = a->ConstantCount();
                 if (TINT_UNLIKELY(!count)) {
                     TINT_ICE() << core::type::Array::kErrExpectedConstantCount;
-                    return b.ty.array(el, u32(1), std::move(attrs));
                 }
                 return b.ty.array(el, u32(count.value()), std::move(attrs));
             },
@@ -968,6 +965,10 @@ class State {
                 return b.ty.sampled_texture(t->dim(), el);
             },
             [&](const core::type::StorageTexture* t) {
+                if (RequiresChromiumInternalGraphite(t)) {
+                    Enable(wgsl::Extension::kChromiumInternalGraphite);
+                }
+
                 return b.ty.storage_texture(t->dim(), t->texel_format(), t->access());
             },
             [&](const core::type::Sampler* s) { return b.ty.sampler(s->kind()); },
@@ -981,9 +982,8 @@ class State {
                                   : core::Access::kUndefined;
                 return b.ty.ptr(address_space, el, access);
             },
-            [&](const core::type::Reference*) {
+            [&](const core::type::Reference*) -> ast::Type {
                 TINT_ICE() << "reference types should never appear in the IR";
-                return b.ty.i32();
             },  //
             TINT_ICE_ON_NO_MATCH);
     }
@@ -1051,12 +1051,17 @@ class State {
         });
     }
 
-    /// Associates the IR value @p value with the AST expression @p expr.
+    /// Associates the IR value @p value with the AST expression @p expr if it is used, otherwise
+    /// creates a phony assignment with @p expr.
     void Bind(const core::ir::Value* value, const ast::Expression* expr) {
         TINT_ASSERT(value);
-        // Value will be inlined at its place of usage.
-        if (TINT_UNLIKELY(!bindings_.Add(value, InlinedValue{expr}))) {
-            TINT_ICE() << "Bind(" << value->TypeInfo().name << ") called twice for same value";
+        if (value->IsUsed()) {
+            // Value will be inlined at its place of usage.
+            if (TINT_UNLIKELY(!bindings_.Add(value, InlinedValue{expr}))) {
+                TINT_ICE() << "Bind(" << value->TypeInfo().name << ") called twice for same value";
+            }
+        } else {
+            Append(b.Assign(b.Phony(), expr));
         }
     }
 
@@ -1191,6 +1196,12 @@ class State {
             default:
                 return false;
         }
+    }
+
+    /// @returns true if the storage texture type requires the kChromiumInternalGraphite extension
+    /// to be enabled.
+    bool RequiresChromiumInternalGraphite(const core::type::StorageTexture* tex) {
+        return tex->texel_format() == core::TexelFormat::kR8Unorm;
     }
 };
 

@@ -27,6 +27,7 @@
 
 #include "dawn/native/SharedResourceMemory.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "dawn/native/Buffer.h"
@@ -53,15 +54,15 @@ SharedResourceMemory::~SharedResourceMemory() = default;
 
 void SharedResourceMemory::DestroyImpl() {}
 
-bool SharedResourceMemory::HasWriteAccess() const {
+bool SharedResourceMemoryContents::HasWriteAccess() const {
     return mSharedResourceAccessState == SharedResourceAccessState::Write;
 }
 
-bool SharedResourceMemory::HasExclusiveReadAccess() const {
+bool SharedResourceMemoryContents::HasExclusiveReadAccess() const {
     return mSharedResourceAccessState == SharedResourceAccessState::ExclusiveRead;
 }
 
-int SharedResourceMemory::GetReadAccessCount() const {
+int SharedResourceMemoryContents::GetReadAccessCount() const {
     return mReadAccessCount;
 }
 
@@ -126,51 +127,59 @@ MaybeError SharedResourceMemory::BeginAccess(Resource* resource,
                         "%s with multiplanar format (%s) must be initialized.", resource,
                         resource->GetFormat().format);
 
-        DAWN_INVALID_IF(HasWriteAccess(), "%s is currently accessed for writing.", this);
-        DAWN_INVALID_IF(HasExclusiveReadAccess(), "%s is currently accessed for exclusive reading.",
-                        this);
+        DAWN_INVALID_IF(mContents->HasWriteAccess(), "%s is currently accessed for writing.", this);
+        DAWN_INVALID_IF(mContents->HasExclusiveReadAccess(),
+                        "%s is currently accessed for exclusive reading.", this);
 
         if (static_cast<TextureBase*>(resource)->IsReadOnly()) {
             if (descriptor->concurrentRead) {
                 DAWN_ASSERT(!mExclusiveAccess);
                 DAWN_INVALID_IF(!descriptor->initialized, "Concurrent reading an uninitialized %s.",
                                 resource);
-                ++mReadAccessCount;
-                mSharedResourceAccessState = SharedResourceAccessState::SimultaneousRead;
+                ++mContents->mReadAccessCount;
+                mContents->mSharedResourceAccessState = SharedResourceAccessState::SimultaneousRead;
 
             } else {
                 DAWN_INVALID_IF(
-                    mReadAccessCount != 0,
+                    mContents->mReadAccessCount != 0,
                     "Exclusive read access used while %s is currently accessed for reading.", this);
-                mSharedResourceAccessState = SharedResourceAccessState::ExclusiveRead;
+                mContents->mSharedResourceAccessState = SharedResourceAccessState::ExclusiveRead;
                 mExclusiveAccess = resource;
             }
         } else {
             DAWN_INVALID_IF(descriptor->concurrentRead, "Concurrent reading read-write %s.",
                             resource);
-            DAWN_INVALID_IF(mReadAccessCount != 0,
+            DAWN_INVALID_IF(mContents->mReadAccessCount != 0,
                             "Read-Write access used while %s is currently accessed for reading.",
                             this);
-            mSharedResourceAccessState = SharedResourceAccessState::Write;
+            mContents->mSharedResourceAccessState = SharedResourceAccessState::Write;
             mExclusiveAccess = resource;
         }
     } else if constexpr (std::is_same_v<Resource, BufferBase>) {
         DAWN_INVALID_IF(mExclusiveAccess != nullptr,
                         "Cannot begin access with %s on %s which is currently accessed by %s.",
                         resource, this, mExclusiveAccess.Get());
-        mSharedResourceAccessState = SharedResourceAccessState::Write;
+        mContents->mSharedResourceAccessState = SharedResourceAccessState::Write;
         mExclusiveAccess = resource;
     }
 
     DAWN_TRY(BeginAccessImpl(resource, descriptor));
 
     for (size_t i = 0; i < descriptor->fenceCount; ++i) {
-        mContents->mPendingFences->push_back(
-            {descriptor->fences[i], descriptor->signaledValues[i]});
+        // Add the fences to mPendingFences if they are not already contained in the list.
+        // This loop is O(n*m), but there shouldn't be very many fences.
+        auto it = std::find_if(
+            mContents->mPendingFences.begin(), mContents->mPendingFences.end(),
+            [&](const auto& fence) { return fence.object.Get() == descriptor->fences[i]; });
+        if (it != mContents->mPendingFences.end()) {
+            it->signaledValue = std::max(it->signaledValue, descriptor->signaledValues[i]);
+            continue;
+        }
+        mContents->mPendingFences.push_back({descriptor->fences[i], descriptor->signaledValues[i]});
     }
 
     DAWN_ASSERT(!resource->IsError());
-    resource->SetHasAccess(true);
+    resource->OnBeginAccess();
     resource->SetInitialized(descriptor->initialized);
     return {};
 }
@@ -205,12 +214,14 @@ MaybeError SharedResourceMemory::BeginAccessImpl(
 
 ResultOrError<FenceAndSignalValue> SharedResourceMemory::EndAccessImpl(
     TextureBase* texture,
+    ExecutionSerial lastUsageSerial,
     UnpackedPtr<SharedTextureMemoryEndAccessState>& state) {
     DAWN_UNREACHABLE();
 }
 
 ResultOrError<FenceAndSignalValue> SharedResourceMemory::EndAccessImpl(
     BufferBase* buffer,
+    ExecutionSerial lastUsageSerial,
     UnpackedPtr<SharedBufferMemoryEndAccessState>& state) {
     DAWN_UNREACHABLE();
 }
@@ -229,24 +240,24 @@ MaybeError SharedResourceMemory::EndAccess(Resource* resource,
     DAWN_INVALID_IF(!resource->HasAccess(), "%s is not currently being accessed.", resource);
     if constexpr (std::is_same_v<Resource, TextureBase>) {
         if (static_cast<TextureBase*>(resource)->IsReadOnly()) {
-            DAWN_ASSERT(!HasWriteAccess());
-            if (HasExclusiveReadAccess()) {
-                DAWN_ASSERT(mReadAccessCount == 0);
-                mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
+            DAWN_ASSERT(!mContents->HasWriteAccess());
+            if (mContents->HasExclusiveReadAccess()) {
+                DAWN_ASSERT(mContents->mReadAccessCount == 0);
+                mContents->mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
                 mExclusiveAccess = nullptr;
             } else {
-                DAWN_ASSERT(mSharedResourceAccessState ==
+                DAWN_ASSERT(mContents->mSharedResourceAccessState ==
                             SharedResourceAccessState::SimultaneousRead);
                 DAWN_ASSERT(mExclusiveAccess == nullptr);
-                --mReadAccessCount;
-                if (mReadAccessCount == 0) {
-                    mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
+                --mContents->mReadAccessCount;
+                if (mContents->mReadAccessCount == 0) {
+                    mContents->mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
                 }
             }
         } else {
-            DAWN_ASSERT(mSharedResourceAccessState == SharedResourceAccessState::Write);
-            DAWN_ASSERT(mReadAccessCount == 0);
-            mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
+            DAWN_ASSERT(mContents->mSharedResourceAccessState == SharedResourceAccessState::Write);
+            DAWN_ASSERT(mContents->mReadAccessCount == 0);
+            mContents->mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
             mExclusiveAccess = nullptr;
         }
     } else if constexpr (std::is_same_v<Resource, BufferBase>) {
@@ -256,33 +267,40 @@ MaybeError SharedResourceMemory::EndAccess(Resource* resource,
         DAWN_INVALID_IF(mExclusiveAccess != resource,
                         "Cannot end access with %s on %s which is currently accessed by %s.",
                         resource, this, mExclusiveAccess.Get());
-        mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
+        mContents->mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
         mExclusiveAccess = nullptr;
     }
 
     PendingFenceList fenceList;
-    mContents->AcquirePendingFences(&fenceList);
+    // The state transitions to NotAccessed if the exclusive access ends, or the last concurrent
+    // read ends. When this occurs, acquire any pending fences that may remain. This occurs if
+    // the accesses never acquired them.
+    if (mContents->mSharedResourceAccessState == SharedResourceAccessState::NotAccessed) {
+        mContents->AcquirePendingFences(&fenceList);
+    }
 
     DAWN_ASSERT(!resource->IsError());
-    resource->SetHasAccess(false);
+    ExecutionSerial lastUsageSerial = resource->OnEndAccess();
 
     *didEnd = true;
 
-    // Call the error-generating part of the EndAccess implementation. This is separated out because
-    // writing the output state must happen regardless of whether or not EndAccessInternal
-    // succeeds.
+    // If the last usage serial is non-zero, the texture was used.
+    // Call the error-generating part of the EndAccess implementation to export a fence.
+    // This is separated out because writing the output state must happen regardless of whether
+    // or not EndAccessInternal succeeds.
     MaybeError err;
-    {
-        ResultOrError<FenceAndSignalValue> result = EndAccessInternal(resource, state);
+    if (lastUsageSerial != kBeginningOfGPUTime) {
+        ResultOrError<FenceAndSignalValue> result =
+            EndAccessInternal(lastUsageSerial, resource, state);
         if (result.IsSuccess()) {
-            fenceList->push_back(result.AcquireSuccess());
+            fenceList.push_back(result.AcquireSuccess());
         } else {
             err = result.AcquireError();
         }
     }
 
     // Copy the fences to the output state.
-    if (size_t fenceCount = fenceList->size()) {
+    if (size_t fenceCount = fenceList.size()) {
         auto* fences = new SharedFenceBase*[fenceCount];
         uint64_t* signaledValues = new uint64_t[fenceCount];
         for (size_t i = 0; i < fenceCount; ++i) {
@@ -304,13 +322,14 @@ MaybeError SharedResourceMemory::EndAccess(Resource* resource,
 
 template <typename Resource, typename EndAccessState>
 ResultOrError<FenceAndSignalValue> SharedResourceMemory::EndAccessInternal(
+    ExecutionSerial lastUsageSerial,
     Resource* resource,
     EndAccessState* rawState) {
     UnpackedPtr<EndAccessState> state;
     DAWN_TRY_ASSIGN(state, ValidateAndUnpack(rawState));
     // Ensure that commands are submitted before exporting fences with the last usage serial.
-    DAWN_TRY(GetDevice()->GetQueue()->EnsureCommandsFlushed(mContents->GetLastUsageSerial()));
-    return EndAccessImpl(resource, state);
+    DAWN_TRY(GetDevice()->GetQueue()->EnsureCommandsFlushed(lastUsageSerial));
+    return EndAccessImpl(resource, lastUsageSerial, state);
 }
 
 // SharedResourceMemoryContents
@@ -325,15 +344,7 @@ const WeakRef<SharedResourceMemory>& SharedResourceMemoryContents::GetSharedReso
 
 void SharedResourceMemoryContents::AcquirePendingFences(PendingFenceList* fences) {
     *fences = mPendingFences;
-    mPendingFences->clear();
-}
-
-void SharedResourceMemoryContents::SetLastUsageSerial(ExecutionSerial lastUsageSerial) {
-    mLastUsageSerial = lastUsageSerial;
-}
-
-ExecutionSerial SharedResourceMemoryContents::GetLastUsageSerial() const {
-    return mLastUsageSerial;
+    mPendingFences.clear();
 }
 
 }  // namespace dawn::native

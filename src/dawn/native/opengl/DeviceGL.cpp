@@ -158,7 +158,7 @@ MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
     // extensions
     bool hasDebugOutput = gl.IsAtLeastGL(4, 3) || gl.IsAtLeastGLES(3, 2);
 
-    if (GetPhysicalDevice()->GetInstance()->IsBackendValidationEnabled() && hasDebugOutput) {
+    if (GetAdapter()->GetInstance()->IsBackendValidationEnabled() && hasDebugOutput) {
         gl.Enable(GL_DEBUG_OUTPUT);
         gl.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 
@@ -272,7 +272,7 @@ ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(
 }
 ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
     TextureBase* texture,
-    const TextureViewDescriptor* descriptor) {
+    const UnpackedPtr<TextureViewDescriptor>& descriptor) {
     return AcquireRef(new TextureView(texture, descriptor));
 }
 
@@ -442,6 +442,22 @@ const OpenGLFunctions& Device::GetGL() const {
 
 int Device::GetMaxTextureMaxAnisotropy() const {
     return mMaxTextureMaxAnisotropy;
+}
+
+const EGLFunctions& Device::GetEGL(bool makeCurrent) const {
+    if (makeCurrent) {
+        mContext->MakeCurrent();
+        ToBackend(GetQueue())->OnGLUsed();
+    }
+    return mContext->GetEGL();
+}
+
+const EGLExtensionSet& Device::GetEGLExtensions() const {
+    return mContext->GetExtensions();
+}
+
+EGLDisplay Device::GetEGLDisplay() const {
+    return mContext->GetEGLDisplay();
 }
 
 }  // namespace dawn::native::opengl

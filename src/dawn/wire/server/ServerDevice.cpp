@@ -71,12 +71,14 @@ WireResult Server::DoDevicePopErrorScope(Known<WGPUDevice> device,
     userdata->eventManager = eventManager;
     userdata->future = future;
 
-    mProcs.devicePopErrorScope(device->handle, ForwardToServer<&Server::OnDevicePopErrorScope>,
-                               userdata.release());
+    mProcs.devicePopErrorScope2(device->handle, {nullptr, WGPUCallbackMode_AllowProcessEvents,
+                                                 ForwardToServer2<&Server::OnDevicePopErrorScope>,
+                                                 userdata.release(), nullptr});
     return WireResult::Success;
 }
 
 void Server::OnDevicePopErrorScope(ErrorScopeUserdata* userdata,
+                                   WGPUPopErrorScopeStatus status,
                                    WGPUErrorType type,
                                    const char* message) {
     ReturnDevicePopErrorScopeCallbackCmd cmd;
@@ -120,7 +122,8 @@ void Server::OnCreateComputePipelineAsyncCallback(CreatePipelineAsyncUserData* d
     cmd.status = status;
     cmd.message = message;
 
-    if (FillReservation(data->pipelineObjectID, pipeline) == WireResult::FatalError) {
+    if (status == WGPUCreatePipelineAsyncStatus_Success &&
+        FillReservation(data->pipelineObjectID, pipeline) == WireResult::FatalError) {
         cmd.status = WGPUCreatePipelineAsyncStatus_Unknown;
         cmd.message = "Destroyed before request was fulfilled.";
     }
@@ -159,7 +162,8 @@ void Server::OnCreateRenderPipelineAsyncCallback(CreatePipelineAsyncUserData* da
     cmd.status = status;
     cmd.message = message;
 
-    if (FillReservation(data->pipelineObjectID, pipeline) == WireResult::FatalError) {
+    if (status == WGPUCreatePipelineAsyncStatus_Success &&
+        FillReservation(data->pipelineObjectID, pipeline) == WireResult::FatalError) {
         cmd.status = WGPUCreatePipelineAsyncStatus_Unknown;
         cmd.message = "Destroyed before request was fulfilled.";
     }

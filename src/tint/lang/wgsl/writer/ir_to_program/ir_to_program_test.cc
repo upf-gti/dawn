@@ -30,8 +30,12 @@
 #include <sstream>
 #include <string>
 
-#include "src/tint/lang/core/ir/disassembler.h"
+#include "src/tint/lang/core/access.h"
+#include "src/tint/lang/core/address_space.h"
+#include "src/tint/lang/core/ir/disassembly.h"
+#include "src/tint/lang/core/texel_format.h"
 #include "src/tint/lang/core/type/storage_texture.h"
+#include "src/tint/lang/core/type/texture_dimension.h"
 #include "src/tint/lang/wgsl/ir/builtin_call.h"
 #include "src/tint/lang/wgsl/ir/unary.h"
 #include "src/tint/lang/wgsl/writer/ir_to_program/ir_to_program.h"
@@ -47,7 +51,7 @@ using namespace tint::core::fluent_types;     // NOLINT
 IRToProgramTest::Result IRToProgramTest::Run() {
     Result result;
 
-    result.ir = tint::core::ir::Disassemble(mod);
+    result.ir = tint::core::ir::Disassemble(mod).Plain();
 
     ProgramOptions options;
     options.allowed_features = AllowedFeatures::Everything();
@@ -2089,7 +2093,7 @@ TEST_F(IRToProgramTest, For_ComplexBody_NoCont) {
                 b.Append(if2->True(), [&] { b.Return(fn, 1_i); });
                 b.Append(if2->False(), [&] { b.Return(fn, 2_i); });
 
-                b.NextIteration(loop);
+                b.Continue(loop);
             });
         });
 
@@ -2626,6 +2630,24 @@ struct S {
 
 fn f(v : S) {
 }
+)");
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// chromium_internal_graphite
+////////////////////////////////////////////////////////////////////////////////
+TEST_F(IRToProgramTest, Enable_ChromiumInternalGraphite_SubgroupBallot) {
+    b.Append(b.ir.root_block, [&] {
+        auto t = b.Var("T", ty.ref<core::AddressSpace::kHandle>(ty.Get<core::type::StorageTexture>(
+                                core::type::TextureDimension::k2d, core::TexelFormat::kR8Unorm,
+                                core::Access::kRead, ty.f32())));
+        t->SetBindingPoint(0, 0);
+    });
+
+    EXPECT_WGSL(R"(
+enable chromium_internal_graphite;
+
+@group(0) @binding(0) var T : texture_storage_2d<r8unorm, read>;
 )");
 }
 

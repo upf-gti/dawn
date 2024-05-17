@@ -150,7 +150,7 @@ os = struct(
 def get_dimension(os, builder_name = None):
     """Returns the dimension to use for the input os and optional builder name"""
     if os.category == os_category.LINUX:
-        return "Ubuntu-18.04"
+        return "Ubuntu-22.04"
     elif os.category == os_category.MAC:
         if "cmake" in builder_name:
             # CMake build runs Tint e2e tests, which must run on 11+ where the metal
@@ -787,6 +787,12 @@ luci.cq_tryjob_verifier(
 luci.cq_tryjob_verifier(
     cq_group = "Dawn-CQ",
     builder = "chromium:try/android-dawn-arm64-exp-rel",
+    includable_only = True,
+)
+
+luci.cq_tryjob_verifier(
+    cq_group = "Dawn-CQ",
+    builder = "chromium:try/dawn-try-mac-arm64-m2-exp",
     includable_only = True,
 )
 

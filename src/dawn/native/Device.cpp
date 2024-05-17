@@ -128,11 +128,6 @@ auto GetOrCreate(ContentLessObjectCache<RefCountedT>& cache,
     return ReturnType(result);
 }
 
-struct DeviceBase::DeprecationWarnings {
-    absl::flat_hash_set<std::string> emitted;
-    size_t count = 0;
-};
-
 namespace {
 
 struct LoggingCallbackTask : CallbackTask {
@@ -427,7 +422,6 @@ MaybeError DeviceBase::Initialize(Ref<QueueBase> defaultQueue) {
     mErrorScopeStack = std::make_unique<ErrorScopeStack>();
     mDynamicUploader = std::make_unique<DynamicUploader>(this);
     mCallbackTaskManager = AcquireRef(new CallbackTaskManager());
-    mDeprecationWarnings = std::make_unique<DeprecationWarnings>();
     mInternalPipelineStore = std::make_unique<InternalPipelineStore>(this);
 
     DAWN_ASSERT(GetPlatform() != nullptr);
@@ -465,7 +459,7 @@ MaybeError DeviceBase::Initialize(Ref<QueueBase> defaultQueue) {
     // mAdapter is not set for mock test devices.
     // TODO(crbug.com/dawn/1702): using a mock adapter could avoid the null checking.
     if (mAdapter != nullptr) {
-        mAdapter->GetPhysicalDevice()->GetInstance()->AddDevice(this);
+        mAdapter->GetInstance()->AddDevice(this);
     }
 
     return {};
@@ -515,12 +509,11 @@ void DeviceBase::WillDropLastExternalRef() {
     // mAdapter is not set for mock test devices.
     // TODO(crbug.com/dawn/1702): using a mock adapter could avoid the null checking.
     if (mAdapter != nullptr) {
-        mAdapter->GetPhysicalDevice()->GetInstance()->RemoveDevice(this);
+        mAdapter->GetInstance()->RemoveDevice(this);
 
         // Once last external ref dropped, all callbacks should be forwarded to Instance's callback
         // queue instead.
-        mCallbackTaskManager =
-            mAdapter->GetPhysicalDevice()->GetInstance()->GetCallbackTaskManager();
+        mCallbackTaskManager = mAdapter->GetInstance()->GetCallbackTaskManager();
     }
 }
 
@@ -793,7 +786,7 @@ void DeviceBase::APISetUncapturedErrorCallback(wgpu::ErrorCallback callback, voi
 }
 
 void DeviceBase::APISetDeviceLostCallback(wgpu::DeviceLostCallback callback, void* userdata) {
-    EmitDeprecationWarning(
+    GetInstance()->EmitDeprecationWarning(
         "SetDeviceLostCallback is deprecated. Pass the callback in the device descriptor instead.");
 
     // The registered callback function and userdata pointer are stored and used by deferred
@@ -828,32 +821,42 @@ void DeviceBase::APIPushErrorScope(wgpu::ErrorFilter filter) {
 void DeviceBase::APIPopErrorScope(wgpu::ErrorCallback callback, void* userdata) {
     static wgpu::ErrorCallback kDefaultCallback = [](WGPUErrorType, char const*, void*) {};
 
-    PopErrorScopeCallbackInfo callbackInfo = {};
-    callbackInfo.mode = wgpu::CallbackMode::AllowProcessEvents;
-    callbackInfo.oldCallback = callback != nullptr ? callback : kDefaultCallback;
-    callbackInfo.userdata = userdata;
-    APIPopErrorScopeF(callbackInfo);
+    APIPopErrorScope2({nullptr, WGPUCallbackMode_AllowProcessEvents,
+                       [](WGPUPopErrorScopeStatus, WGPUErrorType type, char const* message,
+                          void* callback, void* userdata) {
+                           auto cb = reinterpret_cast<wgpu::ErrorCallback>(callback);
+                           cb(type, message, userdata);
+                       },
+                       reinterpret_cast<void*>(callback != nullptr ? callback : kDefaultCallback),
+                       userdata});
 }
 
 Future DeviceBase::APIPopErrorScopeF(const PopErrorScopeCallbackInfo& callbackInfo) {
+    return APIPopErrorScope2({nullptr, ToAPI(callbackInfo.mode),
+                              [](WGPUPopErrorScopeStatus status, WGPUErrorType type,
+                                 char const* message, void* callback, void* userdata) {
+                                  auto cb = reinterpret_cast<WGPUPopErrorScopeCallback>(callback);
+                                  cb(status, type, message, userdata);
+                              },
+                              reinterpret_cast<void*>(callbackInfo.callback),
+                              callbackInfo.userdata});
+}
+
+Future DeviceBase::APIPopErrorScope2(const WGPUPopErrorScopeCallbackInfo2& callbackInfo) {
     struct PopErrorScopeEvent final : public EventManager::TrackedEvent {
-        // TODO(crbug.com/dawn/2021) Remove the old callback type.
-        WGPUPopErrorScopeCallback mCallback;
-        WGPUErrorCallback mOldCallback;
-        void* mUserdata;
+        WGPUPopErrorScopeCallback2 mCallback;
+        raw_ptr<void> mUserdata1;
+        raw_ptr<void> mUserdata2;
         std::optional<ErrorScope> mScope;
 
-        PopErrorScopeEvent(const PopErrorScopeCallbackInfo& callbackInfo,
+        PopErrorScopeEvent(const WGPUPopErrorScopeCallbackInfo2& callbackInfo,
                            std::optional<ErrorScope>&& scope)
-            : TrackedEvent(callbackInfo.mode, TrackedEvent::Completed{}),
+            : TrackedEvent(static_cast<wgpu::CallbackMode>(callbackInfo.mode),
+                           TrackedEvent::Completed{}),
               mCallback(callbackInfo.callback),
-              mOldCallback(callbackInfo.oldCallback),
-              mUserdata(callbackInfo.userdata),
-              mScope(scope) {
-            // Exactly 1 callback should be set.
-            DAWN_ASSERT((mCallback != nullptr && mOldCallback == nullptr) ||
-                        (mCallback == nullptr && mOldCallback != nullptr));
-        }
+              mUserdata1(callbackInfo.userdata1),
+              mUserdata2(callbackInfo.userdata2),
+              mScope(scope) {}
 
         ~PopErrorScopeEvent() override { EnsureComplete(EventCompletionType::Shutdown); }
 
@@ -871,11 +874,8 @@ Future DeviceBase::APIPopErrorScopeF(const PopErrorScopeCallbackInfo& callbackIn
                 message = "No error scopes to pop";
             }
 
-            if (mCallback) {
-                mCallback(status, type, message, mUserdata);
-            } else {
-                mOldCallback(type, message, mUserdata);
-            }
+            mCallback(status, type, message, mUserdata1.ExtractAsDangling(),
+                      mUserdata2.ExtractAsDangling());
         }
     };
 
@@ -956,7 +956,7 @@ const ApiObjectList* DeviceBase::GetObjectTrackingList(ObjectType type) const {
 }
 
 InstanceBase* DeviceBase::GetInstance() const {
-    return mAdapter->GetPhysicalDevice()->GetInstance();
+    return mAdapter->GetInstance();
 }
 
 AdapterBase* DeviceBase::GetAdapter() const {
@@ -968,7 +968,7 @@ PhysicalDeviceBase* DeviceBase::GetPhysicalDevice() const {
 }
 
 dawn::platform::Platform* DeviceBase::GetPlatform() const {
-    return GetPhysicalDevice()->GetInstance()->GetPlatform();
+    return GetAdapter()->GetInstance()->GetPlatform();
 }
 
 InternalPipelineStore* DeviceBase::GetInternalPipelineStore() {
@@ -1091,32 +1091,6 @@ Ref<RenderPipelineBase> DeviceBase::AddOrGetCachedRenderPipeline(
     Ref<RenderPipelineBase> renderPipeline) {
     auto [pipeline, _] = mCaches->renderPipelines.Insert(renderPipeline.Get());
     return std::move(pipeline);
-}
-
-ResultOrError<Ref<TextureViewBase>> DeviceBase::CreateImplicitMSAARenderTextureViewFor(
-    const TextureViewBase* singleSampledTextureView,
-    uint32_t sampleCount) {
-    DAWN_ASSERT(IsLockedByCurrentThreadIfNeeded());
-
-    TextureDescriptor desc = {};
-    desc.dimension = wgpu::TextureDimension::e2D;
-    desc.format = singleSampledTextureView->GetFormat().format;
-    desc.size = {singleSampledTextureView->GetSingleSubresourceVirtualSize().width,
-                 singleSampledTextureView->GetSingleSubresourceVirtualSize().height, 1};
-    desc.sampleCount = sampleCount;
-    desc.usage = wgpu::TextureUsage::RenderAttachment;
-    if (HasFeature(Feature::TransientAttachments)) {
-        desc.usage = desc.usage | wgpu::TextureUsage::TransientAttachment;
-    }
-
-    Ref<TextureBase> msaaTexture;
-    Ref<TextureViewBase> msaaTextureView;
-
-    DAWN_TRY_ASSIGN(msaaTexture, CreateTexture(&desc));
-
-    DAWN_TRY_ASSIGN(msaaTextureView, msaaTexture->CreateView());
-
-    return std::move(msaaTextureView);
 }
 
 ResultOrError<Ref<TextureViewBase>>
@@ -1791,7 +1765,8 @@ void DeviceBase::SetWGSLExtensionAllowList() {
     // mAdapter is not set for mock test devices.
     // TODO(crbug.com/dawn/1702): using a mock adapter and instance could avoid the null checking.
     if (mAdapter != nullptr) {
-        mWGSLAllowedFeatures.features = GetInstance()->GetAllowedWGSLLanguageFeatures();
+        const auto& allowedFeatures = GetInstance()->GetAllowedWGSLLanguageFeatures();
+        mWGSLAllowedFeatures.features = {allowedFeatures.begin(), allowedFeatures.end()};
     }
 }
 
@@ -1821,17 +1796,6 @@ size_t DeviceBase::GetLazyClearCountForTesting() {
 
 void DeviceBase::IncrementLazyClearCountForTesting() {
     ++mLazyClearCountForTesting;
-}
-
-size_t DeviceBase::GetDeprecationWarningCountForTesting() {
-    return mDeprecationWarnings->count;
-}
-
-void DeviceBase::EmitDeprecationWarning(const std::string& message) {
-    mDeprecationWarnings->count++;
-    if (mDeprecationWarnings->emitted.insert(message).second) {
-        dawn::WarningLog() << message;
-    }
 }
 
 void DeviceBase::EmitWarningOnce(const std::string& message) {
@@ -1889,7 +1853,7 @@ void DeviceBase::EmitLog(WGPULoggingType loggingType, const char* message) {
 
 bool DeviceBase::APIGetLimits(SupportedLimits* limits) const {
     DAWN_ASSERT(limits != nullptr);
-    InstanceBase* instance = GetPhysicalDevice()->GetInstance();
+    InstanceBase* instance = GetAdapter()->GetInstance();
 
     UnpackedPtr<SupportedLimits> unpacked;
     if (instance->ConsumedError(ValidateAndUnpack(limits), &unpacked)) {
@@ -2222,7 +2186,7 @@ ResultOrError<Ref<ShaderModuleBase>> DeviceBase::CreateShaderModule(
 ResultOrError<Ref<SwapChainBase>> DeviceBase::CreateSwapChain(
     Surface* surface,
     const SwapChainDescriptor* descriptor) {
-    EmitDeprecationWarning(
+    GetInstance()->EmitDeprecationWarning(
         "The explicit creation of a SwapChain object is deprecated and should be replaced by "
         "Surface configuration.");
 
@@ -2276,7 +2240,7 @@ ResultOrError<Ref<TextureBase>> DeviceBase::CreateTexture(const TextureDescripto
     if (IsValidationEnabled()) {
         AllowMultiPlanarTextureFormat allowMultiPlanar;
         if (HasFeature(Feature::MultiPlanarFormatExtendedUsages)) {
-            allowMultiPlanar = AllowMultiPlanarTextureFormat::Yes;
+            allowMultiPlanar = AllowMultiPlanarTextureFormat::SingleLayerOnly;
         } else {
             allowMultiPlanar = AllowMultiPlanarTextureFormat::No;
         }
@@ -2293,18 +2257,22 @@ ResultOrError<Ref<TextureBase>> DeviceBase::CreateTexture(const TextureDescripto
 
 ResultOrError<Ref<TextureViewBase>> DeviceBase::CreateTextureView(
     TextureBase* texture,
-    const TextureViewDescriptor* descriptor) {
+    const TextureViewDescriptor* descriptorOrig) {
     DAWN_TRY(ValidateIsAlive());
     DAWN_TRY(ValidateObject(texture));
 
     TextureViewDescriptor desc;
-    DAWN_TRY_ASSIGN(desc, GetTextureViewDescriptorWithDefaults(texture, descriptor));
+    DAWN_TRY_ASSIGN(desc, GetTextureViewDescriptorWithDefaults(texture, descriptorOrig));
 
+    UnpackedPtr<TextureViewDescriptor> descriptor;
     if (IsValidationEnabled()) {
-        DAWN_TRY_CONTEXT(ValidateTextureViewDescriptor(this, texture, &desc),
-                         "validating %s against %s.", &desc, texture);
+        DAWN_TRY_ASSIGN_CONTEXT(descriptor, ValidateAndUnpack(&desc), "validating %s.", &desc);
+        DAWN_TRY_CONTEXT(ValidateTextureViewDescriptor(this, texture, descriptor),
+                         "validating %s against %s.", descriptor, texture);
+    } else {
+        descriptor = Unpack(&desc);
     }
-    return CreateTextureViewImpl(texture, &desc);
+    return CreateTextureViewImpl(texture, descriptor);
 }
 
 ResultOrError<wgpu::TextureUsage> DeviceBase::GetSupportedSurfaceUsage(

@@ -140,7 +140,6 @@ struct DAWN_NATIVE_EXPORT DawnInstanceDescriptor : wgpu::ChainedStruct {
 
     BackendValidationLevel backendValidationLevel = BackendValidationLevel::Disabled;
     bool beginCaptureOnStartup = false;
-    bool enableAdapterBlocklist = false;
 
     WGPULoggingCallback loggingCallback = nullptr;
     void* loggingCallbackUserdata = nullptr;
@@ -180,10 +179,9 @@ class DAWN_NATIVE_EXPORT Instance {
     // Enable debug capture on Dawn startup
     void EnableBeginCaptureOnStartup(bool beginCaptureOnStartup);
 
-    // Enable / disable the adapter blocklist.
-    void EnableAdapterBlocklist(bool enable);
-
     uint64_t GetDeviceCountForTesting() const;
+    // Backdoor to get the number of deprecation warnings for testing
+    uint64_t GetDeprecationWarningCountForTesting() const;
 
     // Returns the underlying WGPUInstance object.
     WGPUInstance Get() const;
@@ -203,12 +201,6 @@ DAWN_NATIVE_EXPORT std::vector<const char*> GetTogglesUsed(WGPUDevice device);
 
 // Backdoor to get the number of lazy clears for testing
 DAWN_NATIVE_EXPORT size_t GetLazyClearCountForTesting(WGPUDevice device);
-
-// Backdoor to get the number of deprecation warnings for testing
-DAWN_NATIVE_EXPORT size_t GetDeprecationWarningCountForTesting(WGPUDevice device);
-
-// Backdoor to get the number of physical devices an instance knows about for testing
-DAWN_NATIVE_EXPORT size_t GetPhysicalDeviceCountForTesting(WGPUInstance instance);
 
 //  Query if texture has been initialized
 DAWN_NATIVE_EXPORT bool IsTextureSubresourceInitialized(
@@ -238,8 +230,6 @@ enum ExternalImageType {
     OpaqueFD,
     DmaBuf,
     IOSurface,
-    DXGISharedHandle,
-    D3D11Texture,
     EGLImage,
     GLTexture,
     AHardwareBuffer,

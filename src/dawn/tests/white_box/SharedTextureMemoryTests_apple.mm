@@ -61,12 +61,31 @@ class Backend : public SharedTextureMemoryTestBackend {
         if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatNv12a)) {
             features.push_back(wgpu::FeatureName::MultiPlanarFormatNv12a);
         }
+        if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatNv16)) {
+            features.push_back(wgpu::FeatureName::MultiPlanarFormatNv16);
+        }
+        if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatNv24)) {
+            features.push_back(wgpu::FeatureName::MultiPlanarFormatNv24);
+        }
+        if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatP010)) {
+            features.push_back(wgpu::FeatureName::MultiPlanarFormatP010);
+        }
+        if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatP210)) {
+            features.push_back(wgpu::FeatureName::MultiPlanarFormatP210);
+        }
+        if (device.HasFeature(wgpu::FeatureName::MultiPlanarFormatP410)) {
+            features.push_back(wgpu::FeatureName::MultiPlanarFormatP410);
+        }
+        if (device.HasFeature(wgpu::FeatureName::Unorm16TextureFormats)) {
+            features.push_back(wgpu::FeatureName::Unorm16TextureFormats);
+        }
 
         return features;
     }
 
     // Create one basic shared texture memory. It should support most operations.
-    wgpu::SharedTextureMemory CreateSharedTextureMemory(const wgpu::Device& device) override {
+    wgpu::SharedTextureMemory CreateSharedTextureMemory(const wgpu::Device& device,
+                                                        int layerCount) override {
         auto dict = AcquireCFRef(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                                            &kCFTypeDictionaryKeyCallBacks,
                                                            &kCFTypeDictionaryValueCallBacks));
@@ -85,7 +104,8 @@ class Backend : public SharedTextureMemoryTestBackend {
     }
 
     std::vector<std::vector<wgpu::SharedTextureMemory>> CreatePerDeviceSharedTextureMemories(
-        const std::vector<wgpu::Device>& devices) override {
+        const std::vector<wgpu::Device>& devices,
+        int layerCount) override {
         std::vector<std::vector<wgpu::SharedTextureMemory>> memories;
 
         struct IOSurfaceFormat {
@@ -93,23 +113,31 @@ class Backend : public SharedTextureMemoryTestBackend {
             uint32_t bytesPerElement;
             wgpu::FeatureName requiredFeature = wgpu::FeatureName::Undefined;
         };
-        const std::array<IOSurfaceFormat, 12> kFormats{{
-            {kCVPixelFormatType_64RGBAHalf, 8},
-            {kCVPixelFormatType_TwoComponent16Half, 4},
-            {kCVPixelFormatType_OneComponent16Half, 2},
-            {kCVPixelFormatType_TwoComponent16, 4, wgpu::FeatureName::Unorm16TextureFormats},
-            {kCVPixelFormatType_OneComponent16, 2, wgpu::FeatureName::Unorm16TextureFormats},
-            {kCVPixelFormatType_ARGB2101010LEPacked, 4},
-            {kCVPixelFormatType_32RGBA, 4},
-            {kCVPixelFormatType_32BGRA, 4},
-            {kCVPixelFormatType_TwoComponent8, 2},
-            {kCVPixelFormatType_OneComponent8, 1},
-            // Below bytes per element isn't correct.
-            {kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, 4},
-            {kCVPixelFormatType_420YpCbCr8VideoRange_8A_TriPlanar, 4,
-             wgpu::FeatureName::MultiPlanarFormatNv12a},
-            // TODO(dawn:551): Add R10X6BG10X6Biplanar420Unorm support.
-        }};
+        const std::array<IOSurfaceFormat, 17> kFormats{
+            {{kCVPixelFormatType_64RGBAHalf, 8},
+             {kCVPixelFormatType_TwoComponent16Half, 4},
+             {kCVPixelFormatType_OneComponent16Half, 2},
+             {kCVPixelFormatType_TwoComponent16, 4, wgpu::FeatureName::Unorm16TextureFormats},
+             {kCVPixelFormatType_OneComponent16, 2, wgpu::FeatureName::Unorm16TextureFormats},
+             {kCVPixelFormatType_ARGB2101010LEPacked, 4},
+             {kCVPixelFormatType_32RGBA, 4},
+             {kCVPixelFormatType_32BGRA, 4},
+             {kCVPixelFormatType_TwoComponent8, 2},
+             {kCVPixelFormatType_OneComponent8, 1},
+             // Below bytes per element isn't correct.
+             {kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, 4},
+             {kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange, 4,
+              wgpu::FeatureName::MultiPlanarFormatNv16},
+             {kCVPixelFormatType_444YpCbCr8BiPlanarVideoRange, 4,
+              wgpu::FeatureName::MultiPlanarFormatNv24},
+             {kCVPixelFormatType_420YpCbCr8VideoRange_8A_TriPlanar, 4,
+              wgpu::FeatureName::MultiPlanarFormatNv12a},
+             {kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, 8,
+              wgpu::FeatureName::MultiPlanarFormatP010},
+             {kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, 8,
+              wgpu::FeatureName::MultiPlanarFormatP210},
+             {kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, 8,
+              wgpu::FeatureName::MultiPlanarFormatP410}}};
 
         for (auto f : kFormats) {
             for (uint32_t size : {4, 64}) {
@@ -253,12 +281,14 @@ TEST_P(SharedTextureMemoryTests, SharedFenceExportInfoInvalidChainedStruct) {
 DAWN_INSTANTIATE_PREFIXED_TEST_P(Metal,
                                  SharedTextureMemoryNoFeatureTests,
                                  {MetalBackend()},
-                                 {Backend::GetInstance()});
+                                 {Backend::GetInstance()},
+                                 {1});
 
 DAWN_INSTANTIATE_PREFIXED_TEST_P(Metal,
                                  SharedTextureMemoryTests,
                                  {MetalBackend()},
-                                 {Backend::GetInstance()});
+                                 {Backend::GetInstance()},
+                                 {1});
 
 }  // anonymous namespace
 }  // namespace dawn

@@ -44,7 +44,7 @@
 
 // TODO(crbug.com/dawn/283): Link against the Vulkan Loader and remove this.
 #if defined(DAWN_ENABLE_SWIFTSHADER)
-#if DAWN_PLATFORM_IS(LINUX) || DAWN_PLATFORM_IS(FUSCHIA)
+#if DAWN_PLATFORM_IS(LINUX) || DAWN_PLATFORM_IS(FUCHSIA)
 constexpr char kSwiftshaderLibName[] = "libvk_swiftshader.so";
 #elif DAWN_PLATFORM_IS(WINDOWS)
 constexpr char kSwiftshaderLibName[] = "vk_swiftshader.dll";
@@ -283,10 +283,6 @@ OnInstanceCreationDebugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT mess
 
 }  // anonymous namespace
 
-SamplerYCbCrVulkanDescriptor::SamplerYCbCrVulkanDescriptor() {
-    sType = wgpu::SType::SamplerYCbCrVulkanDescriptor;
-}
-
 VulkanInstance::VulkanInstance() = default;
 
 VulkanInstance::~VulkanInstance() {
@@ -489,11 +485,12 @@ ResultOrError<VulkanGlobalKnobs> VulkanInstance::CreateVkInstance(const Instance
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensionNames.size());
     createInfo.ppEnabledExtensionNames = extensionNames.data();
 
+    VkDebugUtilsMessengerCreateInfoEXT utilsMessengerCreateInfo;
+    VkValidationFeaturesEXT validationFeatures;
     PNextChainBuilder createInfoChain(&createInfo);
 
     // Register the debug callback for instance creation so we receive message for any errors
     // (validation or other).
-    VkDebugUtilsMessengerCreateInfoEXT utilsMessengerCreateInfo;
     if (usedKnobs.HasExt(InstanceExt::DebugUtils)) {
         utilsMessengerCreateInfo.flags = 0;
         utilsMessengerCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
@@ -509,7 +506,6 @@ ResultOrError<VulkanGlobalKnobs> VulkanInstance::CreateVkInstance(const Instance
 
     // Try to turn on synchronization validation if the instance was created with backend
     // validation enabled.
-    VkValidationFeaturesEXT validationFeatures;
     VkValidationFeatureEnableEXT kEnableSynchronizationValidation =
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
     if (instance->IsBackendValidationEnabled() &&
@@ -616,8 +612,8 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
             const std::vector<VkPhysicalDevice>& vkPhysicalDevices =
                 mVulkanInstances[icd]->GetVkPhysicalDevices();
             for (VkPhysicalDevice vkPhysicalDevice : vkPhysicalDevices) {
-                Ref<PhysicalDevice> physicalDevice = AcquireRef(
-                    new PhysicalDevice(instance, mVulkanInstances[icd].Get(), vkPhysicalDevice, xrConfig));
+                Ref<PhysicalDevice> physicalDevice =
+                    AcquireRef(new PhysicalDevice(mVulkanInstances[icd].Get(), vkPhysicalDevice, xrConfig));
                 if (instance->ConsumedErrorAndWarnOnce(physicalDevice->Initialize())) {
                     continue;
                 }
@@ -628,20 +624,6 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
                                mPhysicalDevices[icd].end());
     }
     return physicalDevices;
-}
-
-void Backend::ClearPhysicalDevices() {
-    for (ICD icd : kICDs) {
-        mPhysicalDevices[icd].clear();
-    }
-}
-
-size_t Backend::GetPhysicalDeviceCountForTesting() const {
-    size_t count = 0;
-    for (ICD icd : kICDs) {
-        count += mPhysicalDevices[icd].size();
-    }
-    return count;
 }
 
 BackendConnection* Connect(InstanceBase* instance) {

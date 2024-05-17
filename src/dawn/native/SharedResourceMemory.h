@@ -28,7 +28,7 @@
 #ifndef SRC_DAWN_NATIVE_SHAREDRESOURCEMEMORY_H_
 #define SRC_DAWN_NATIVE_SHAREDRESOURCEMEMORY_H_
 
-#include "dawn/common/StackContainer.h"
+#include "absl/container/inlined_vector.h"
 #include "dawn/common/WeakRef.h"
 #include "dawn/common/WeakRefSupport.h"
 #include "dawn/native/Error.h"
@@ -51,7 +51,11 @@ class SharedResource : public ApiObjectBase {
 
     SharedResourceMemoryContents* GetSharedResourceMemoryContents() const;
 
-    virtual void SetHasAccess(bool hasAccess) = 0;
+    // Set the resource state to allow access.
+    virtual void OnBeginAccess() = 0;
+    // Set the resource state to disallow access, and return the last usage serial.
+    virtual ExecutionSerial OnEndAccess() = 0;
+    // Check whether the resource may be accessed.
     virtual bool HasAccess() const = 0;
     virtual bool IsDestroyed() const = 0;
     virtual void SetInitialized(bool initialized) = 0;
@@ -64,7 +68,7 @@ class SharedResource : public ApiObjectBase {
 
 class SharedResourceMemory : public ApiObjectBase, public WeakRefSupport<SharedResourceMemory> {
   public:
-    using PendingFenceList = StackVector<FenceAndSignalValue, 1>;
+    using PendingFenceList = absl::InlinedVector<FenceAndSignalValue, 1>;
 
     ~SharedResourceMemory() override;
     void Initialize();
@@ -100,10 +104,6 @@ class SharedResourceMemory : public ApiObjectBase, public WeakRefSupport<SharedR
     SharedResourceMemory(DeviceBase* device, ObjectBase::ErrorTag, const char* label);
     using ApiObjectBase::ApiObjectBase;
 
-    bool HasWriteAccess() const;
-    bool HasExclusiveReadAccess() const;
-    int GetReadAccessCount() const;
-
   private:
     virtual Ref<SharedResourceMemoryContents> CreateContents();
 
@@ -114,7 +114,8 @@ class SharedResourceMemory : public ApiObjectBase, public WeakRefSupport<SharedR
     MaybeError EndAccess(Resource* resource, EndAccessState* state, bool* didEnd);
 
     template <typename Resource, typename EndAccessState>
-    ResultOrError<FenceAndSignalValue> EndAccessInternal(Resource* resource,
+    ResultOrError<FenceAndSignalValue> EndAccessInternal(ExecutionSerial lastUsageSerial,
+                                                         Resource* resource,
                                                          EndAccessState* rawState);
 
     // BeginAccessImpl validates the operation is valid on the backend, and performs any
@@ -130,14 +131,14 @@ class SharedResourceMemory : public ApiObjectBase, public WeakRefSupport<SharedR
     // It should also write out any backend specific state in chained out structs of EndAccessState.
     virtual ResultOrError<FenceAndSignalValue> EndAccessImpl(
         TextureBase* texture,
+        ExecutionSerial lastUsageSerial,
         UnpackedPtr<SharedTextureMemoryEndAccessState>& state);
     virtual ResultOrError<FenceAndSignalValue> EndAccessImpl(
         BufferBase* buffer,
+        ExecutionSerial lastUsageSerial,
         UnpackedPtr<SharedBufferMemoryEndAccessState>& state);
 
     Ref<SharedResource> mExclusiveAccess;
-    SharedResourceAccessState mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
-    int mReadAccessCount = 0;
     Ref<SharedResourceMemoryContents> mContents;
 };
 
@@ -153,18 +154,19 @@ class SharedResourceMemoryContents : public RefCounted {
 
     void AcquirePendingFences(PendingFenceList* fences);
 
-    // Set the last usage serial. This indicates when the SharedFence exported
-    // from APIEndAccess will complete.
-    void SetLastUsageSerial(ExecutionSerial lastUsageSerial);
-    ExecutionSerial GetLastUsageSerial() const;
-
     const WeakRef<SharedResourceMemory>& GetSharedResourceMemory() const;
+
+    bool HasWriteAccess() const;
+    bool HasExclusiveReadAccess() const;
+    int GetReadAccessCount() const;
 
   private:
     friend class SharedResourceMemory;
 
     PendingFenceList mPendingFences;
-    ExecutionSerial mLastUsageSerial{0};
+
+    SharedResourceAccessState mSharedResourceAccessState = SharedResourceAccessState::NotAccessed;
+    int mReadAccessCount = 0;
 
     WeakRef<SharedResourceMemory> mSharedResourceMemory;
 };

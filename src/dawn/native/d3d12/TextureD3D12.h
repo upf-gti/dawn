@@ -59,14 +59,6 @@ class Texture final : public d3d::Texture {
   public:
     static ResultOrError<Ref<Texture>> Create(Device* device,
                                               const UnpackedPtr<TextureDescriptor>& descriptor);
-    static ResultOrError<Ref<Texture>> CreateExternalImage(
-        Device* device,
-        const UnpackedPtr<TextureDescriptor>& descriptor,
-        ComPtr<IUnknown> d3dTexture,
-        Ref<d3d::KeyedMutex> keyedMutex,
-        std::vector<FenceAndSignalValue> waitFences,
-        bool isSwapChainTexture,
-        bool isInitialized);
     static ResultOrError<Ref<Texture>> Create(Device* device,
                                               const UnpackedPtr<TextureDescriptor>& descriptor,
                                               ComPtr<ID3D12Resource> d3d12Texture);
@@ -171,9 +163,9 @@ class Texture final : public d3d::Texture {
 
     Ref<d3d::KeyedMutex> mKeyedMutex;
 
-    // TODO(crbug.com/1515640): Remove these once Chromium has migrated to SharedTextureMemory.
+    // TODO(crbug.com/1515640): Remove wait fences once Chromium has migrated to
+    // SharedTextureMemory.
     std::vector<FenceAndSignalValue> mWaitFences;
-    std::optional<ExecutionSerial> mSignalFenceValue;
 
     bool mSwapChainTexture = false;
 
@@ -182,7 +174,8 @@ class Texture final : public d3d::Texture {
 
 class TextureView final : public TextureViewBase {
   public:
-    static Ref<TextureView> Create(TextureBase* texture, const TextureViewDescriptor* descriptor);
+    static Ref<TextureView> Create(TextureBase* texture,
+                                   const UnpackedPtr<TextureViewDescriptor>& descriptor);
 
     DXGI_FORMAT GetD3D12Format() const;
 
@@ -192,7 +185,7 @@ class TextureView final : public TextureViewBase {
     D3D12_UNORDERED_ACCESS_VIEW_DESC GetUAVDescriptor() const;
 
   private:
-    TextureView(TextureBase* texture, const TextureViewDescriptor* descriptor);
+    TextureView(TextureBase* texture, const UnpackedPtr<TextureViewDescriptor>& descriptor);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC mSrvDesc;
 };

@@ -234,7 +234,7 @@ SanitizedResult Sanitize(const Program& in,
         options.texture_builtins_from_uniform.ubo_binding,
         options.texture_builtins_from_uniform.ubo_bindingpoint_ordering);
 
-    data.Add<CombineSamplers::BindingInfo>(options.binding_map, options.placeholder_binding_point);
+    data.Add<CombineSamplersInfo>(options.combined_samplers_info);
     manager.Add<CombineSamplers>();
 
     data.Add<ast::transform::BindingRemapper::Remappings>(
@@ -397,7 +397,7 @@ void ASTPrinter::EmitBitcastCall(StringStream& out, const ast::CallExpression* c
     auto* dst_type = TypeOf(call);
 
     if (!dst_type->is_integer_scalar_or_vector() && !dst_type->is_float_scalar_or_vector()) {
-        diagnostics_.AddError(diag::System::Writer, Source{})
+        diagnostics_.AddError(Source{})
             << "Unable to do bitcast to type " << dst_type->FriendlyName();
         return;
     }
@@ -612,7 +612,6 @@ void ASTPrinter::EmitBitwiseBoolOp(StringStream& out, const ast::BinaryExpressio
         out << " | ";
     } else {
         TINT_ICE() << "unexpected binary op: " << expr->op;
-        return;
     }
 
     // Cast RHS to uint scalar or vector type.
@@ -738,7 +737,6 @@ void ASTPrinter::EmitBinary(StringStream& out, const ast::BinaryExpression* expr
         case core::BinaryOp::kLogicalOr: {
             // These are both handled above.
             TINT_UNREACHABLE();
-            return;
         }
         case core::BinaryOp::kEqual:
             out << "==";
@@ -1349,7 +1347,6 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
     auto* texture = arg(Usage::kTexture);
     if (TINT_UNLIKELY(!texture)) {
         TINT_ICE() << "missing texture argument";
-        return;
     }
 
     auto* texture_type = TypeOf(texture)->UnwrapRef()->As<core::type::Texture>();
@@ -1522,7 +1519,6 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
             break;
         default:
             TINT_ICE() << "Unhandled texture builtin '" << std::string(builtin->str()) << "'";
-            return;
     }
 
     if (builtin->Signature().IndexOf(core::ParameterUsage::kOffset) >= 0) {
@@ -1536,7 +1532,6 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
     auto* param_coords = arg(Usage::kCoords);
     if (TINT_UNLIKELY(!param_coords)) {
         TINT_ICE() << "missing coords argument";
-        return;
     }
 
     if (auto* array_index = arg(Usage::kArrayIndex)) {
@@ -1628,7 +1623,6 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
         TINT_ICE() << "WGSL return width (" << wgsl_ret_width
                    << ") is wider than GLSL return width (" << glsl_ret_width << ") for "
                    << builtin->Fn();
-        return;
     }
 }
 
@@ -1744,8 +1738,7 @@ std::string ASTPrinter::generate_builtin_name(const sem::BuiltinFn* builtin) {
         case wgsl::BuiltinFn::kUnpack4X8Unorm:
             return "unpackUnorm4x8";
         default:
-            diagnostics_.AddError(diag::System::Writer, Source{})
-                << "Unknown builtin method: " << builtin;
+            diagnostics_.AddError(Source{}) << "Unknown builtin method: " << builtin;
     }
 
     return "";
@@ -1916,14 +1909,13 @@ void ASTPrinter::EmitGlobalVariable(const ast::Variable* global) {
                     return;
                 default: {
                     TINT_ICE() << "unhandled address space " << sem->AddressSpace();
-                    break;
                 }
             }
         },
         [&](const ast::Let* let) { EmitProgramConstVariable(let); },
         [&](const ast::Override*) {
             // Override is removed with SubstituteOverride
-            diagnostics_.AddError(diag::System::Writer, Source{})
+            diagnostics_.AddError(Source{})
                 << "override-expressions should have been removed with the "
                    "SubstituteOverride transform";
         },
@@ -1938,7 +1930,6 @@ void ASTPrinter::EmitUniformVariable(const ast::Var* var, const sem::Variable* s
     auto* str = type->As<core::type::Struct>();
     if (TINT_UNLIKELY(!str)) {
         TINT_ICE() << "storage variable must be of struct type";
-        return;
     }
     auto bp = *sem->As<sem::GlobalVariable>()->Attributes().binding_point;
     {
@@ -1957,7 +1948,6 @@ void ASTPrinter::EmitStorageVariable(const ast::Var* var, const sem::Variable* s
     auto* str = type->As<core::type::Struct>();
     if (TINT_UNLIKELY(!str)) {
         TINT_ICE() << "storage variable must be of struct type";
-        return;
     }
     auto bp = *sem->As<sem::GlobalVariable>()->Attributes().binding_point;
     Line() << "layout(binding = " << bp.binding << ", std430) buffer "
@@ -1983,7 +1973,6 @@ void ASTPrinter::EmitHandleVariable(const ast::Var* var, const sem::Variable* se
         switch (storage->texel_format()) {
             case core::TexelFormat::kBgra8Unorm:
                 TINT_ICE() << "bgra8unorm should have been polyfilled to rgba8unorm";
-                break;
             case core::TexelFormat::kR32Uint:
                 out << "r32ui";
                 break;
@@ -2037,7 +2026,6 @@ void ASTPrinter::EmitHandleVariable(const ast::Var* var, const sem::Variable* se
                 break;
             case core::TexelFormat::kUndefined:
                 TINT_ICE() << "invalid texel format";
-                return;
         }
         out << ") ";
     }
@@ -2192,7 +2180,7 @@ void ASTPrinter::EmitEntryPointFunction(const ast::Function* func) {
             out << "local_size_" << (i == 0 ? "x" : i == 1 ? "y" : "z") << " = ";
 
             if (!wgsize[i].has_value()) {
-                diagnostics_.AddError(diag::System::Writer, Source{})
+                diagnostics_.AddError(Source{})
                     << "override-expressions should have been removed with the SubstituteOverride "
                        "transform";
                 return;
@@ -2295,8 +2283,7 @@ void ASTPrinter::EmitConstant(StringStream& out, const core::constant::Value* co
 
             auto count = a->ConstantCount();
             if (!count) {
-                diagnostics_.AddError(diag::System::Writer, Source{})
-                    << core::type::Array::kErrExpectedConstantCount;
+                diagnostics_.AddError(Source{}) << core::type::Array::kErrExpectedConstantCount;
                 return;
             }
 
@@ -2347,8 +2334,7 @@ void ASTPrinter::EmitLiteral(StringStream& out, const ast::LiteralExpression* li
                     return;
                 }
             }
-            diagnostics_.AddError(diag::System::Writer, Source{})
-                << "unknown integer literal suffix type";
+            diagnostics_.AddError(Source{}) << "unknown integer literal suffix type";
         },  //
         TINT_ICE_ON_NO_MATCH);
 }
@@ -2400,8 +2386,7 @@ void ASTPrinter::EmitZeroValue(StringStream& out, const core::type::Type* type) 
 
         auto count = arr->ConstantCount();
         if (!count) {
-            diagnostics_.AddError(diag::System::Writer, Source{})
-                << core::type::Array::kErrExpectedConstantCount;
+            diagnostics_.AddError(Source{}) << core::type::Array::kErrExpectedConstantCount;
             return;
         }
 
@@ -2412,7 +2397,7 @@ void ASTPrinter::EmitZeroValue(StringStream& out, const core::type::Type* type) 
             EmitZeroValue(out, arr->ElemType());
         }
     } else {
-        diagnostics_.AddError(diag::System::Writer, Source{})
+        diagnostics_.AddError(Source{})
             << "Invalid type for zero emission: " << type->FriendlyName();
     }
 }
@@ -2688,8 +2673,7 @@ void ASTPrinter::EmitType(StringStream& out,
             } else {
                 auto count = arr->ConstantCount();
                 if (!count) {
-                    diagnostics_.AddError(diag::System::Writer, Source{})
-                        << core::type::Array::kErrExpectedConstantCount;
+                    diagnostics_.AddError(Source{}) << core::type::Array::kErrExpectedConstantCount;
                     return;
                 }
                 sizes.push_back(count.value());
@@ -2737,7 +2721,6 @@ void ASTPrinter::EmitType(StringStream& out,
     } else if (auto* tex = type->As<core::type::Texture>()) {
         if (TINT_UNLIKELY(tex->Is<core::type::ExternalTexture>())) {
             TINT_ICE() << "Multiplanar external texture transform was not run.";
-            return;
         }
 
         auto* storage = tex->As<core::type::StorageTexture>();
@@ -2775,7 +2758,6 @@ void ASTPrinter::EmitType(StringStream& out,
                 } break;
                 default:
                     TINT_UNREACHABLE() << "unexpected storage texture access " << storage->access();
-                    return;
             }
         }
         auto* subtype = sampled   ? sampled->type()
@@ -2789,7 +2771,6 @@ void ASTPrinter::EmitType(StringStream& out,
             out << "u";
         } else {
             TINT_ICE() << "Unsupported texture type";
-            return;
         }
 
         out << (storage ? "image" : "sampler");
@@ -2815,7 +2796,6 @@ void ASTPrinter::EmitType(StringStream& out,
                 break;
             default:
                 TINT_UNREACHABLE() << "unexpected TextureDimension " << tex->dim();
-                return;
         }
         if (tex->Is<core::type::DepthTexture>()) {
             out << "Shadow";
@@ -2844,7 +2824,7 @@ void ASTPrinter::EmitType(StringStream& out,
     } else if (type->Is<core::type::Void>()) {
         out << "void";
     } else {
-        diagnostics_.AddError(diag::System::Writer, Source{}) << "unknown type in EmitType";
+        diagnostics_.AddError(Source{}) << "unknown type in EmitType";
     }
 }
 

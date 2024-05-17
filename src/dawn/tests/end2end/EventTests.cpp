@@ -152,9 +152,9 @@ class EventCompletionTests : public DawnTestWithParams<EventCompletionTestParams
 
     void LoseTestDevice() {
         EXPECT_CALL(mDeviceLostCallback,
-                    Call(testing::_, WGPUDeviceLostReason_Undefined, testing::_, testing::_))
+                    Call(testing::_, WGPUDeviceLostReason_Unknown, testing::_, testing::_))
             .Times(1);
-        testDevice.ForceLoss(wgpu::DeviceLostReason::Undefined, "Device lost for testing");
+        testDevice.ForceLoss(wgpu::DeviceLostReason::Unknown, "Device lost for testing");
         testInstance.ProcessEvents();
     }
 
@@ -473,8 +473,9 @@ TEST_P(EventCompletionTests, WorkDoneDropInstanceAfterEvent) {
 // - Other tests?
 
 DAWN_INSTANTIATE_TEST_P(EventCompletionTests,
-                        {D3D11Backend(), D3D12Backend(), MetalBackend(), VulkanBackend(),
-                         OpenGLBackend(), OpenGLESBackend()},
+                        {D3D11Backend(), D3D11Backend({"d3d11_use_unmonitored_fence"}),
+                         D3D12Backend(), MetalBackend(), VulkanBackend(), OpenGLBackend(),
+                         OpenGLESBackend()},
                         {
                             WaitTypeAndCallbackMode::TimedWaitAny_WaitAnyOnly,
                             WaitTypeAndCallbackMode::TimedWaitAny_AllowSpontaneous,
@@ -628,6 +629,7 @@ TEST_P(WaitAnyTests, UnsupportedMixedSources) {
 
 DAWN_INSTANTIATE_TEST(WaitAnyTests,
                       D3D11Backend(),
+                      D3D11Backend({"d3d11_use_unmonitored_fence"}),
                       D3D12Backend(),
                       MetalBackend(),
                       VulkanBackend(),
@@ -645,15 +647,15 @@ TEST_P(FutureTests, MixedSourcePolling) {
 
     // PopErrorScope is implemented via a signal.
     device.PushErrorScope(wgpu::ErrorFilter::Validation);
-    device.PopErrorScope({nullptr, wgpu::CallbackMode::AllowProcessEvents,
-                          [](WGPUPopErrorScopeStatus, WGPUErrorType, char const*, void*) {},
-                          nullptr, nullptr});
+    device.PopErrorScope(wgpu::CallbackMode::AllowProcessEvents,
+                         [](wgpu::PopErrorScopeStatus, wgpu::ErrorType, const char*) {});
 
     instance.ProcessEvents();
 }
 
 DAWN_INSTANTIATE_TEST(FutureTests,
                       D3D11Backend(),
+                      D3D11Backend({"d3d11_use_unmonitored_fence"}),
                       D3D12Backend(),
                       MetalBackend(),
                       VulkanBackend(),

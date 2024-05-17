@@ -263,6 +263,7 @@ class DawnTestBase {
     bool IsANGLESwiftShader() const;
     bool IsANGLED3D11() const;
     bool IsWARP() const;
+    bool IsMesaSoftware() const;
 
     bool IsIntelGen9() const;
     bool IsIntelGen12() const;
@@ -330,7 +331,7 @@ class DawnTestBase {
     DawnProcTable backendProcs = {};
     WGPUDevice backendDevice = nullptr;
 
-    size_t mLastWarningCount = 0;
+    uint64_t mLastWarningCount = 0;
 
     // Mock callbacks tracking errors and destruction. These are strict mocks because any errors or
     // device loss that aren't expected should result in test failures and not just some warnings
@@ -606,6 +607,8 @@ class DawnTestBase {
     wgpu::SupportedLimits GetAdapterLimits();
     wgpu::SupportedLimits GetSupportedLimits();
 
+    uint64_t GetDeprecationWarningCountForTesting() const;
+
     void* GetUniqueUserdata();
 
   private:
@@ -712,20 +715,20 @@ class DawnTestBase {
 #define DAWN_SUPPRESS_TEST_IF(condition) \
     DAWN_SKIP_TEST_IF_BASE(!RunSuppressedTests() && condition, "suppressed", condition)
 
-#define EXPECT_DEPRECATION_WARNINGS(statement, n)                                               \
-    do {                                                                                        \
-        if (UsesWire()) {                                                                       \
-            statement;                                                                          \
-        } else {                                                                                \
-            size_t warningsBefore = native::GetDeprecationWarningCountForTesting(device.Get()); \
-            statement;                                                                          \
-            size_t warningsAfter = native::GetDeprecationWarningCountForTesting(device.Get());  \
-            EXPECT_EQ(mLastWarningCount, warningsBefore);                                       \
-            if (!HasToggleEnabled("skip_validation")) {                                         \
-                EXPECT_EQ(warningsAfter, warningsBefore + n);                                   \
-            }                                                                                   \
-            mLastWarningCount = warningsAfter;                                                  \
-        }                                                                                       \
+#define EXPECT_DEPRECATION_WARNINGS(statement, n)                             \
+    do {                                                                      \
+        if (UsesWire()) {                                                     \
+            statement;                                                        \
+        } else {                                                              \
+            uint64_t warningsBefore = GetDeprecationWarningCountForTesting(); \
+            statement;                                                        \
+            uint64_t warningsAfter = GetDeprecationWarningCountForTesting();  \
+            EXPECT_EQ(mLastWarningCount, warningsBefore);                     \
+            if (!HasToggleEnabled("skip_validation")) {                       \
+                EXPECT_EQ(warningsAfter, warningsBefore + n);                 \
+            }                                                                 \
+            mLastWarningCount = warningsAfter;                                \
+        }                                                                     \
     } while (0)
 #define EXPECT_DEPRECATION_WARNING(statement) EXPECT_DEPRECATION_WARNINGS(statement, 1)
 

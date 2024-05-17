@@ -196,31 +196,6 @@ ResultOrError<Ref<Texture>> Texture::Create(Device* device,
 }
 
 // static
-ResultOrError<Ref<Texture>> Texture::CreateExternalImage(
-    Device* device,
-    const UnpackedPtr<TextureDescriptor>& descriptor,
-    ComPtr<IUnknown> d3dTexture,
-    Ref<d3d::KeyedMutex> keyedMutex,
-    std::vector<FenceAndSignalValue> waitFences,
-    bool isSwapChainTexture,
-    bool isInitialized) {
-    Ref<Texture> dawnTexture = AcquireRef(new Texture(device, descriptor));
-    DAWN_TRY(dawnTexture->InitializeAsExternalTexture(std::move(d3dTexture), std::move(keyedMutex),
-                                                      std::move(waitFences), isSwapChainTexture));
-
-    // Importing a multi-planar format must be initialized. This is required because
-    // a shared multi-planar format cannot be initialized by Dawn.
-    DAWN_INVALID_IF(
-        !isInitialized && dawnTexture->GetFormat().IsMultiPlanar(),
-        "Cannot create a texture with a multi-planar format (%s) with uninitialized data.",
-        dawnTexture->GetFormat().format);
-
-    dawnTexture->SetIsSubresourceContentInitialized(isInitialized,
-                                                    dawnTexture->GetAllSubresources());
-    return std::move(dawnTexture);
-}
-
-// static
 ResultOrError<Ref<Texture>> Texture::Create(Device* device,
                                             const UnpackedPtr<TextureDescriptor>& descriptor,
                                             ComPtr<ID3D12Resource> d3d12Texture) {
@@ -379,24 +354,23 @@ ResultOrError<ExecutionSerial> Texture::EndAccess() {
     NotifySwapChainPresentToPIX();
 
     // Synchronize if texture access wasn't synchronized already due to ExecuteCommandLists. If
-    // there were pending commands that used this texture mSignalFenceValue will be set, but if it's
-    // still not set, generate a signal fence after waiting on wait fences.
+    // there were pending commands that used this texture mLastSharedTextureMemoryUsageSerial will
+    // be set, but if it's still not set, generate a signal fence after waiting on wait fences.
     Queue* queue = ToBackend(GetDevice()->GetQueue());
-    if (!mSignalFenceValue) {
+    if (mLastSharedTextureMemoryUsageSerial == kBeginningOfGPUTime) {
         // Even though we aren't recording any commands here, asking for a command context ensures
         // that the device fence is signaled eventually even if no commands were recorded before
         // EndAccess. This is a little sub-optimal, but shouldn't occur often in practice.
         CommandRecordingContext* context =
             queue->GetPendingCommandContext(ExecutionQueueBase::SubmitMode::Passive);
         DAWN_TRY(SynchronizeTextureBeforeUse(context));
-        DAWN_ASSERT(mSignalFenceValue);
+        DAWN_ASSERT(mLastSharedTextureMemoryUsageSerial != kBeginningOfGPUTime);
     }
     // Make the queue signal the fence in finite time.
-    DAWN_TRY(queue->EnsureCommandsFlushed(*mSignalFenceValue));
+    DAWN_TRY(queue->EnsureCommandsFlushed(mLastSharedTextureMemoryUsageSerial));
 
-    ExecutionSerial ret = mSignalFenceValue.value();
-    // Explicitly call reset() since std::move() on optional doesn't make it std::nullopt.
-    mSignalFenceValue.reset();
+    ExecutionSerial ret = mLastSharedTextureMemoryUsageSerial;
+    mLastSharedTextureMemoryUsageSerial = kBeginningOfGPUTime;
     return ret;
 }
 
@@ -443,9 +417,8 @@ MaybeError Texture::SynchronizeTextureBeforeUse(CommandRecordingContext* command
     if (SharedResourceMemoryContents* contents = GetSharedResourceMemoryContents()) {
         SharedTextureMemoryBase::PendingFenceList fences;
         contents->AcquirePendingFences(&fences);
-        waitFences.insert(waitFences.end(), std::make_move_iterator(fences->begin()),
-                          std::make_move_iterator(fences->end()));
-        contents->SetLastUsageSerial(queue->GetPendingCommandSerial());
+        waitFences.insert(waitFences.end(), std::make_move_iterator(fences.begin()),
+                          std::make_move_iterator(fences.end()));
     }
 
     ID3D12CommandQueue* commandQueue = queue->GetCommandQueue();
@@ -459,7 +432,7 @@ MaybeError Texture::SynchronizeTextureBeforeUse(CommandRecordingContext* command
     if (mKeyedMutex != nullptr) {
         DAWN_TRY(commandContext->AcquireKeyedMutex(mKeyedMutex));
     }
-    mSignalFenceValue = queue->GetPendingCommandSerial();
+    mLastSharedTextureMemoryUsageSerial = queue->GetPendingCommandSerial();
     return {};
 }
 
@@ -591,8 +564,8 @@ void Texture::TransitionSubresourceRange(std::vector<D3D12_RESOURCE_BARRIER>* ba
         // state at all times that read accesses are happening; otherwise, the
         // texture can enter a state where it could be modified by one read access
         // (e.g., to be compressed or decrompessed) while being read by another.
-        bool inReadAccess = HasAccess() && IsReadOnly();
-        DAWN_ASSERT(state->isValidToDecay || !inReadAccess);
+        DAWN_ASSERT(state->isValidToDecay || mSharedResourceMemoryContents->HasWriteAccess() ||
+                    mSharedResourceMemoryContents->HasExclusiveReadAccess());
     }
 
     D3D12_RESOURCE_BARRIER barrier;
@@ -958,11 +931,11 @@ bool Texture::StateAndDecay::operator==(const Texture::StateAndDecay& other) con
 
 // static
 Ref<TextureView> TextureView::Create(TextureBase* texture,
-                                     const TextureViewDescriptor* descriptor) {
+                                     const UnpackedPtr<TextureViewDescriptor>& descriptor) {
     return AcquireRef(new TextureView(texture, descriptor));
 }
 
-TextureView::TextureView(TextureBase* texture, const TextureViewDescriptor* descriptor)
+TextureView::TextureView(TextureBase* texture, const UnpackedPtr<TextureViewDescriptor>& descriptor)
     : TextureViewBase(texture, descriptor) {
     mSrvDesc.Format = d3d::DXGITextureFormat(descriptor->format);
     mSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;

@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -432,22 +433,7 @@ MaybeError QueueBase::WriteBufferImpl(BufferBase* buffer,
                                       uint64_t bufferOffset,
                                       const void* data,
                                       size_t size) {
-    if (size == 0) {
-        return {};
-    }
-
-    DeviceBase* device = GetDevice();
-
-    UploadHandle uploadHandle;
-    DAWN_TRY_ASSIGN(uploadHandle,
-                    device->GetDynamicUploader()->Allocate(size, GetPendingCommandSerial(),
-                                                           kCopyBufferToBufferOffsetAlignment));
-    DAWN_ASSERT(uploadHandle.mappedBuffer != nullptr);
-
-    memcpy(uploadHandle.mappedBuffer, data, size);
-
-    return device->CopyFromStagingToBuffer(uploadHandle.stagingBuffer, uploadHandle.startOffset,
-                                           buffer, bufferOffset, size);
+    return buffer->UploadData(bufferOffset, data, size);
 }
 
 void QueueBase::APIWriteTexture(const ImageCopyTexture* destination,
@@ -577,9 +563,15 @@ MaybeError QueueBase::ValidateSubmit(uint32_t commandCount,
     TRACE_EVENT0(GetDevice()->GetPlatform(), Validation, "Queue::ValidateSubmit");
     DAWN_TRY(GetDevice()->ValidateObject(this));
 
+    std::set<CommandBufferBase*> uniqueCommandBuffers;
+
     for (uint32_t i = 0; i < commandCount; ++i) {
         DAWN_TRY(GetDevice()->ValidateObject(commands[i]));
         DAWN_TRY(commands[i]->ValidateCanUseInSubmitNow());
+
+        auto insertResult = uniqueCommandBuffers.insert(commands[i]);
+        DAWN_INVALID_IF(!insertResult.second, "Submit contains duplicates of %s.", commands[i]);
+
         const CommandBufferResourceUsage& usages = commands[i]->GetResourceUsages();
 
         for (const BufferBase* buffer : usages.topLevelBuffers) {

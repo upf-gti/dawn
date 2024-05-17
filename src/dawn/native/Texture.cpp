@@ -46,6 +46,7 @@
 #include "dawn/native/ValidationUtils_autogen.h"
 
 namespace dawn::native {
+
 namespace {
 
 MaybeError ValidateTextureViewFormatCompatibility(const DeviceBase* device,
@@ -226,9 +227,10 @@ MaybeError ValidateSampleCount(const TextureDescriptor* descriptor,
     return {};
 }
 
-MaybeError ValidateTextureViewDimensionCompatibility(const DeviceBase* device,
-                                                     const TextureBase* texture,
-                                                     const TextureViewDescriptor* descriptor) {
+MaybeError ValidateTextureViewDimensionCompatibility(
+    const DeviceBase* device,
+    const TextureBase* texture,
+    const UnpackedPtr<TextureViewDescriptor>& descriptor) {
     DAWN_INVALID_IF(!IsArrayLayerValidForTextureViewDimension(descriptor->dimension,
                                                               descriptor->arrayLayerCount),
                     "The dimension (%s) of the texture view is not compatible with the layer count "
@@ -494,8 +496,6 @@ wgpu::TextureViewDimension ResolveDefaultCompatiblityTextureBindingViewDimension
     }
 
     switch (descriptor->dimension) {
-        case wgpu::TextureDimension::Undefined:
-            DAWN_UNREACHABLE();
         case wgpu::TextureDimension::e1D:
             return wgpu::TextureViewDimension::e1D;
         case wgpu::TextureDimension::e2D:
@@ -503,6 +503,9 @@ wgpu::TextureViewDimension ResolveDefaultCompatiblityTextureBindingViewDimension
                                                             : wgpu::TextureViewDimension::e2DArray;
         case wgpu::TextureDimension::e3D:
             return wgpu::TextureViewDimension::e3D;
+        case wgpu::TextureDimension::Undefined:
+        default:
+            DAWN_UNREACHABLE();
     }
 }
 
@@ -528,6 +531,12 @@ MaybeError ValidateTextureDescriptor(
     if (format->IsMultiPlanar()) {
         switch (allowMultiPlanar) {
             case AllowMultiPlanarTextureFormat::Yes:
+                DAWN_INVALID_IF(descriptor->dimension != wgpu::TextureDimension::e2D ||
+                                    descriptor->mipLevelCount != 1,
+                                "Multiplanar texture must be non-mipmapped & 2D in order to be "
+                                "created directly.");
+                break;
+            case AllowMultiPlanarTextureFormat::SingleLayerOnly:
                 DAWN_INVALID_IF(descriptor->dimension != wgpu::TextureDimension::e2D ||
                                     descriptor->mipLevelCount != 1 ||
                                     descriptor->size.depthOrArrayLayers != 1,
@@ -587,14 +596,13 @@ MaybeError ValidateTextureDescriptor(
 
 MaybeError ValidateTextureViewDescriptor(const DeviceBase* device,
                                          const TextureBase* texture,
-                                         const TextureViewDescriptor* descriptor) {
-    DAWN_INVALID_IF(descriptor->nextInChain != nullptr, "nextInChain must be nullptr.");
-
+                                         const UnpackedPtr<TextureViewDescriptor>& descriptor) {
     // Parent texture should have been already validated.
     DAWN_ASSERT(texture);
     DAWN_ASSERT(!texture->IsError());
 
     DAWN_TRY(ValidateTextureViewDimension(descriptor->dimension));
+    // TODO(crbug.com/dawn/2476): Add necessary validation for TextureFormat::External.
     DAWN_TRY(ValidateTextureFormat(descriptor->format));
     DAWN_TRY(ValidateTextureAspect(descriptor->aspect));
 
@@ -625,8 +633,15 @@ MaybeError ValidateTextureViewDescriptor(const DeviceBase* device,
         "texture's mip level count (%u).",
         descriptor->baseMipLevel, descriptor->mipLevelCount, texture->GetNumMipLevels());
 
+    // TODO(crbug.com/dawn/2476): Add necessary validations to CanViewTextureAs for
+    // TextureFormat::External.
     DAWN_TRY(ValidateCanViewTextureAs(device, texture, *viewFormat, descriptor->aspect));
     DAWN_TRY(ValidateTextureViewDimensionCompatibility(device, texture, descriptor));
+
+    if (descriptor.Get<YCbCrVkDescriptor>()) {
+        DAWN_INVALID_IF(!device->HasFeature(Feature::YCbCrVulkanSamplers), "%s is not enabled.",
+                        wgpu::FeatureName::YCbCrVulkanSamplers);
+    }
 
     return {};
 }
@@ -666,6 +681,7 @@ ResultOrError<TextureViewDescriptor> GetTextureViewDescriptorWithDefaults(
         }
     }
 
+    // TODO(crbug.com/dawn/2476): Add TextureFormat::External validation.
     if (desc.format == wgpu::TextureFormat::Undefined) {
         const Format& format = texture->GetFormat();
 
@@ -790,8 +806,6 @@ TextureBase::TextureBase(DeviceBase* device,
                          ObjectBase::ErrorTag tag)
     : SharedResource(device, tag, descriptor->label),
       mDimension(descriptor->dimension),
-      mCompatibilityTextureBindingViewDimension(
-          ResolveDefaultCompatiblityTextureBindingViewDimension(device, Unpack(descriptor))),
       mFormat(kUnusedFormat),
       mBaseSize(descriptor->size),
       mMipLevelCount(descriptor->mipLevelCount),
@@ -890,10 +904,8 @@ Extent3D TextureBase::GetSize(Aspect aspect) const {
         case Aspect::Plane1: {
             DAWN_ASSERT(GetFormat().IsMultiPlanar());
             auto planeSize = mBaseSize;
-            switch (GetFormat().format) {
-                case wgpu::TextureFormat::R8BG8Biplanar420Unorm:
-                case wgpu::TextureFormat::R10X6BG10X6Biplanar420Unorm:
-                case wgpu::TextureFormat::R8BG8A8Triplanar420Unorm:
+            switch (GetFormat().subSampling) {
+                case TextureSubsampling::e420:
                     if (planeSize.width > 1) {
                         planeSize.width >>= 1;
                     }
@@ -901,7 +913,14 @@ Extent3D TextureBase::GetSize(Aspect aspect) const {
                         planeSize.height >>= 1;
                     }
                     break;
-                default:
+                case TextureSubsampling::e422:
+                    if (planeSize.width > 1) {
+                        planeSize.width >>= 1;
+                    }
+                    break;
+                case TextureSubsampling::e444:
+                    break;
+                case TextureSubsampling::Undefined:
                     DAWN_UNREACHABLE();
             }
             return planeSize;
@@ -982,9 +1001,15 @@ void TextureBase::SetInitialized(bool initialized) {
     SetIsSubresourceContentInitialized(initialized, GetAllSubresources());
 }
 
-void TextureBase::SetHasAccess(bool hasAccess) {
-    DAWN_ASSERT(!IsError());
-    mState.hasAccess = hasAccess;
+ExecutionSerial TextureBase::OnEndAccess() {
+    mState.hasAccess = false;
+    ExecutionSerial lastUsageSerial = mLastSharedTextureMemoryUsageSerial;
+    mLastSharedTextureMemoryUsageSerial = kBeginningOfGPUTime;
+    return lastUsageSerial;
+}
+
+void TextureBase::OnBeginAccess() {
+    mState.hasAccess = true;
 }
 
 bool TextureBase::HasAccess() const {
@@ -1192,6 +1217,8 @@ void TextureBase::DumpMemoryStatistics(dawn::native::MemoryDump* dump, const cha
     dump->AddString(name.c_str(), "label", GetLabel());
     dump->AddString(name.c_str(), "dimensions", GetSizeLabel());
     dump->AddString(name.c_str(), "format", absl::StrFormat("%s", GetFormat().format));
+    dump->AddString(name.c_str(), "usage", absl::StrFormat("%s", GetUsage()));
+    dump->AddString(name.c_str(), "internal_usage", absl::StrFormat("%s", GetInternalUsage()));
 }
 
 uint64_t TextureBase::ComputeEstimatedByteSize() const {
@@ -1248,7 +1275,8 @@ wgpu::TextureUsage TextureBase::APIGetUsage() const {
 
 // TextureViewBase
 
-TextureViewBase::TextureViewBase(TextureBase* texture, const TextureViewDescriptor* descriptor)
+TextureViewBase::TextureViewBase(TextureBase* texture,
+                                 const UnpackedPtr<TextureViewDescriptor>& descriptor)
     : ApiObjectBase(texture->GetDevice(), descriptor->label),
       mTexture(texture),
       mFormat(GetDevice()->GetValidInternalFormat(descriptor->format)),

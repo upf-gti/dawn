@@ -1,29 +1,29 @@
-//* Copyright 2017 The Dawn & Tint Authors
-//*
-//* Redistribution and use in source and binary forms, with or without
-//* modification, are permitted provided that the following conditions are met:
-//*
-//* 1. Redistributions of source code must retain the above copyright notice, this
-//*    list of conditions and the following disclaimer.
-//*
-//* 2. Redistributions in binary form must reproduce the above copyright notice,
-//*    this list of conditions and the following disclaimer in the documentation
-//*    and/or other materials provided with the distribution.
-//*
-//* 3. Neither the name of the copyright holder nor the names of its
-//*    contributors may be used to endorse or promote products derived from
-//*    this software without specific prior written permission.
-//*
-//* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-//* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-//* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-//* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-//* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-//* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-//* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-//* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Copyright 2017 The Dawn & Tint Authors
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {% set API = metadata.api.upper() %}
 {% set api = API.lower() %}
 {% if 'dawn' in enabled_tags %}
@@ -31,16 +31,19 @@
     #error "Do not include this header. Emscripten already provides headers needed for {{metadata.api}}."
     #endif
 {% endif %}
-#ifndef {{API}}_CPP_H_
-#define {{API}}_CPP_H_
+{% set PREFIX = "" if not c_namespace else c_namespace.SNAKE_CASE() + "_" %}
+#ifndef {{PREFIX}}{{API}}_CPP_H_
+#define {{PREFIX}}{{API}}_CPP_H_
 
-#include "{{api}}/{{api}}.h"
-#include "{{api}}/{{api}}_cpp_chained_struct.h"
-#include "{{api}}/{{api}}_enum_class_bitmasks.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <functional>
+
+#include "{{c_header}}"
+#include "{{api}}/{{api}}_cpp_chained_struct.h"
+#include "{{api}}/{{api}}_enum_class_bitmasks.h"
 
 namespace {{metadata.namespace}} {
 
@@ -81,7 +84,7 @@ static T& AsNonConstReference(const T& value) {
 {%- endmacro -%}
 
 {%- macro render_cpp_to_c_method_call(type, method) -%}
-    {{as_cMethod(type.name, method.name)}}(Get()
+    {{as_cMethodNamespaced(type.name, method.name, c_namespace)}}(Get()
         {%- for arg in method.arguments -%},{{" "}}{{render_c_actual_arg(arg)}}
         {%- endfor -%}
     )
@@ -117,15 +120,6 @@ static T& AsNonConstReference(const T& value) {
     using {{as_cppType(type.name)}} = {{as_cType(type.name)}};
 {% endfor %}
 
-{% for type in by_category["object"] %}
-    class {{as_cppType(type.name)}};
-{% endfor %}
-
-{% for type in by_category["structure"] %}
-    struct {{as_cppType(type.name)}};
-{% endfor %}
-
-
 // Special class for booleans in order to allow implicit conversions.
 {% set BoolCppType = as_cppType(types["bool"].name) %}
 {% set BoolCType = as_cType(types["bool"].name) %}
@@ -145,12 +139,6 @@ class {{BoolCppType}} {
     {{BoolCType}} mValue = static_cast<{{BoolCType}}>(false);
 };
 
-{% for typeDef in by_category["typedef"] %}
-    // {{as_cppType(typeDef.name)}} is deprecated.
-    // Use {{as_cppType(typeDef.type.name)}} instead.
-    using {{as_cppType(typeDef.name)}} = {{as_cppType(typeDef.type.name)}};
-
-{% endfor %}
 template<typename Derived, typename CType>
 class ObjectBase {
   public:
@@ -246,6 +234,72 @@ class ObjectBase {
     {%- endif -%}
 {%- endmacro %}
 
+//* This rendering macro should ONLY be used for callback info type functions.
+{% macro render_cpp_callback_info_template_method_declaration(type, method, dfn=False) %}
+    {% set CppType = as_cppType(type.name) %}
+    {% set OriginalMethodName = method.name.CamelCase() %}
+    {% set MethodName = OriginalMethodName[:-1] if method.name.chunks[-1] == "2" else OriginalMethodName %}
+    {% set MethodName = CppType + "::" + MethodName if dfn else MethodName %}
+    //* Stripping the 2 at the end of the callback functions for now until we can deprecate old ones.
+    //* TODO: crbug.com/dawn/2509 - Remove name handling once old APIs are deprecated.
+    {% set CallbackInfoType = (method.arguments|last).type %}
+    {% set CallbackType = (CallbackInfoType.members|first).type %}
+    {% set SfinaeArg = " = std::enable_if_t<std::is_convertible_v<F, Cb*>>" if not dfn else "" %}
+    template <typename F, typename T,
+              typename Cb
+                {%- if not dfn -%}
+                    {{" "}}= void (
+                        {%- for arg in CallbackType.arguments -%}
+                            {{as_annotated_cppType(arg)}}{{", "}}
+                        {%- endfor -%}
+                    T userdata)
+                {%- endif -%},
+              typename{{SfinaeArg}}>
+    {{as_cppType(method.return_type.name)}} {{MethodName}}(
+        {%- for arg in method.arguments if arg.type.category != "callback info" -%}
+            {%- if arg.type.category == "object" and arg.annotation == "value" -%}
+                {{as_cppType(arg.type.name)}} const& {{as_varName(arg.name)}}{{ ", "}}
+            {%- else -%}
+                {{as_annotated_cppType(arg)}}{{ ", "}}
+            {%- endif -%}
+        {%- endfor -%}
+    {{as_cppType(types["callback mode"].name)}} mode, F callback, T userdata) const
+{%- endmacro %}
+
+//* This rendering macro should ONLY be used for callback info type functions.
+{% macro render_cpp_callback_info_lambda_method_declaration(type, method, dfn=False) %}
+    {% set CppType = as_cppType(type.name) %}
+    {% set OriginalMethodName = method.name.CamelCase() %}
+    {% set MethodName = OriginalMethodName[:-1] if method.name.chunks[-1] == "2" else OriginalMethodName %}
+    {% set MethodName = CppType + "::" + MethodName if dfn else MethodName %}
+    //* Stripping the 2 at the end of the callback functions for now until we can deprecate old ones.
+    //* TODO: crbug.com/dawn/2509 - Remove name handling once old APIs are deprecated.
+    {% set CallbackInfoType = (method.arguments|last).type %}
+    {% set CallbackType = (CallbackInfoType.members|first).type %}
+    {% set SfinaeArg = " = std::enable_if_t<std::is_convertible_v<L, Cb>>" if not dfn else "" %}
+    template <typename L,
+              typename Cb
+                {%- if not dfn -%}
+                    {{" "}}= std::function<void(
+                        {%- for arg in CallbackType.arguments -%}
+                            {%- if not loop.first %}, {% endif -%}
+                            {{as_annotated_cppType(arg)}}
+                        {%- endfor -%}
+                    )>
+                {%- endif -%},
+              typename{{SfinaeArg}}>
+    {{as_cppType(method.return_type.name)}} {{MethodName}}(
+        {%- for arg in method.arguments if arg.type.category != "callback info" -%}
+            {%- if arg.type.category == "object" and arg.annotation == "value" -%}
+                {{as_cppType(arg.type.name)}} const& {{as_varName(arg.name)}}{{ ", "}}
+            {%- else -%}
+                {{as_annotated_cppType(arg)}}{{ ", "}}
+            {%- endif -%}
+        {%- endfor -%}
+    {{as_cppType(types["callback mode"].name)}} mode, L callback) const
+{%- endmacro %}
+
+//* This rendering macro should NOT be used for callback info type functions.
 {% macro render_cpp_method_declaration(type, method, dfn=False) %}
     {% set CppType = as_cppType(type.name) %}
     {% set OriginalMethodName = method.name.CamelCase() %}
@@ -264,6 +318,135 @@ class ObjectBase {
     ) const
 {%- endmacro %}
 
+{%- macro render_function_call(function) -%}
+    {{as_cMethodNamespaced(None, function.name, c_namespace)}}(
+        {%- for arg in function.arguments -%}
+            {% if not loop.first %}, {% endif %}{{render_c_actual_arg(arg)}}
+        {%- endfor -%}
+    )
+{%- endmacro -%}
+
+{%- if metadata.namespace != 'wgpu' %}
+    // The operators of webgpu_enum_class_bitmasks.h are in the wgpu:: namespace,
+    // and need to be imported into this namespace for Argument Dependent Lookup.
+    WGPU_IMPORT_BITMASK_OPERATORS
+{% endif %}
+
+{% if c_namespace %}
+    namespace {{c_namespace.namespace_case()}} {
+{% endif %}
+
+{% for type in by_category["object"] %}
+    class {{as_cppType(type.name)}};
+{% endfor %}
+
+{% for type in by_category["structure"] %}
+    struct {{as_cppType(type.name)}};
+{% endfor %}
+
+{% macro render_cpp_callback_info_template_method_impl(type, method) %}
+    {{render_cpp_callback_info_template_method_declaration(type, method, dfn=True)}} {
+        {% set CallbackInfoType = (method.arguments|last).type %}
+        {% set CallbackType = (CallbackInfoType.members|first).type %}
+        {{as_cType(CallbackInfoType.name)}} callbackInfo = {};
+        callbackInfo.mode = static_cast<{{as_cType(types["callback mode"].name)}}>(mode);
+        callbackInfo.callback = [](
+            {%- for arg in CallbackType.arguments -%}
+                {{as_annotated_cType(arg)}}{{", "}}
+            {%- endfor -%}
+        void* callback, void* userdata) {
+            auto cb = reinterpret_cast<Cb*>(callback);
+            (*cb)(
+                {%- for arg in CallbackType.arguments -%}
+                    {{convert_cType_to_cppType(arg.type, arg.annotation, as_varName(arg.name))}}{{", "}}
+                {%- endfor -%}
+            static_cast<T>(userdata));
+        };
+        callbackInfo.userdata1 = reinterpret_cast<void*>(+callback);
+        callbackInfo.userdata2 = reinterpret_cast<void*>(userdata);
+        auto result = {{as_cMethod(type.name, method.name)}}(Get(){{", "}}
+            {%- for arg in method.arguments if arg.type.category != "callback info" -%}
+                {{render_c_actual_arg(arg)}}{{", "}}
+            {%- endfor -%}
+        callbackInfo);
+        return {{convert_cType_to_cppType(method.return_type, 'value', 'result') | indent(4)}};
+    }
+{%- endmacro %}
+
+{% macro render_cpp_callback_info_lambda_method_impl(type, method) %}
+    {{render_cpp_callback_info_lambda_method_declaration(type, method, dfn=True)}} {
+        {% set CallbackInfoType = (method.arguments|last).type %}
+        {% set CallbackType = (CallbackInfoType.members|first).type %}
+        using F = void (
+            {%- for arg in CallbackType.arguments -%}
+                {%- if not loop.first %}, {% endif -%}
+                {{as_annotated_cppType(arg)}}
+            {%- endfor -%}
+        );
+
+        {{as_cType(CallbackInfoType.name)}} callbackInfo = {};
+        callbackInfo.mode = static_cast<{{as_cType(types["callback mode"].name)}}>(mode);
+        if constexpr (std::is_convertible_v<L, F*>) {
+            callbackInfo.callback = [](
+            {%- for arg in CallbackType.arguments -%}
+                {{as_annotated_cType(arg)}}{{", "}}
+            {%- endfor -%}
+            void* callback, void*) {
+                auto cb = reinterpret_cast<F*>(callback);
+                (*cb)(
+                    {%- for arg in CallbackType.arguments -%}
+                        {%- if not loop.first %}, {% endif -%}
+                        {{convert_cType_to_cppType(arg.type, arg.annotation, as_varName(arg.name))}}
+                    {%- endfor -%});
+            };
+            callbackInfo.userdata1 = reinterpret_cast<void*>(+callback);
+            callbackInfo.userdata2 = nullptr;
+            auto result = {{as_cMethod(type.name, method.name)}}(Get(){{", "}}
+            {%- for arg in method.arguments if arg.type.category != "callback info" -%}
+                {{render_c_actual_arg(arg)}}{{", "}}
+            {%- endfor -%}
+            callbackInfo);
+            return {{convert_cType_to_cppType(method.return_type, 'value', 'result') | indent(8)}};
+        } else {
+            auto* lambda = new L(callback);
+            callbackInfo.callback = [](
+                {%- for arg in CallbackType.arguments -%}
+                    {{as_annotated_cType(arg)}}{{", "}}
+                {%- endfor -%}
+            void* callback, void*) {
+                std::unique_ptr<L> lambda(reinterpret_cast<L*>(callback));
+                (*lambda)(
+                    {%- for arg in CallbackType.arguments -%}
+                        {%- if not loop.first %}, {% endif -%}
+                        {{convert_cType_to_cppType(arg.type, arg.annotation, as_varName(arg.name))}}
+                    {%- endfor -%});
+            };
+            callbackInfo.userdata1 = reinterpret_cast<void*>(lambda);
+            callbackInfo.userdata2 = nullptr;
+            auto result = {{as_cMethod(type.name, method.name)}}(Get(){{", "}}
+            {%- for arg in method.arguments if arg.type.category != "callback info" -%}
+                {{render_c_actual_arg(arg)}}{{", "}}
+            {%- endfor -%}
+            callbackInfo);
+            return {{convert_cType_to_cppType(method.return_type, 'value', 'result') | indent(8)}};
+        }
+    }
+{%- endmacro %}
+
+{% macro render_cpp_method_impl(type, method) %}
+    {{render_cpp_method_declaration(type, method, dfn=True)}} {
+        {% for arg in method.arguments if arg.type.has_free_members_function and arg.annotation == '*' %}
+            *{{as_varName(arg.name)}} = {{as_cppType(arg.type.name)}}();
+        {% endfor %}
+        {% if method.return_type.name.concatcase() == "void" %}
+            {{render_cpp_to_c_method_call(type, method)}};
+        {% else %}
+            auto result = {{render_cpp_to_c_method_call(type, method)}};
+            return {{convert_cType_to_cppType(method.return_type, 'value', 'result') | indent(8)}};
+        {% endif %}
+    }
+{%- endmacro %}
+
 {% for type in by_category["object"] %}
     {% set CppType = as_cppType(type.name) %}
     {% set CType = as_cType(type.name) %}
@@ -273,7 +456,12 @@ class ObjectBase {
         using ObjectBase::operator=;
 
         {% for method in type.methods %}
-            inline {{render_cpp_method_declaration(type, method)}};
+            {% if has_callbackInfoStruct(method) %}
+                {{render_cpp_callback_info_template_method_declaration(type, method)|indent}};
+                {{render_cpp_callback_info_lambda_method_declaration(type, method)|indent}};
+            {% else %}
+                inline {{render_cpp_method_declaration(type, method)}};
+            {% endif %}
         {% endfor %}
 
       private:
@@ -282,32 +470,6 @@ class ObjectBase {
         static inline void {{c_prefix}}Release({{CType}} handle);
     };
 
-{% endfor %}
-
-{%- macro render_function_call(function) -%}
-    {{as_cMethod(None, function.name)}}(
-        {%- for arg in function.arguments -%}
-            {% if not loop.first %}, {% endif %}{{render_c_actual_arg(arg)}}
-        {%- endfor -%}
-    )
-{%- endmacro -%}
-
-// Free Functions
-
-{% for function in by_category["function"] if not function.no_cpp %}
-    inline {{as_cppType(function.return_type.name)}} {{as_cppType(function.name)}}(
-        {%- for arg in function.arguments -%}
-            {%- if not loop.first %}, {% endif -%}
-            {{as_annotated_cppType(arg)}}{{render_cpp_default_value(arg, False)}}
-        {%- endfor -%}
-    ) {
-        {% if function.return_type.name.concatcase() == "void" %}
-            {{render_function_call(function)}};
-        {% else %}
-            auto result = {{render_function_call(function)}};
-            return {{convert_cType_to_cppType(function.return_type, 'value', 'result')}};
-        {% endif %}
-    }
 {% endfor %}
 
 // ChainedStruct
@@ -329,13 +491,14 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
             // Can be chained in {{as_cppType(root.name)}}
         {% endfor %}
         struct {{as_cppType(type.name)}} : ChainedStruct{{Out}} {
-            {{as_cppType(type.name)}}() {
-                sType = SType::{{type.name.CamelCase()}};
-            }
+            inline {{as_cppType(type.name)}}();
+
+            struct Init;
+            inline {{as_cppType(type.name)}}(Init&& init);
     {% else %}
         struct {{as_cppType(type.name)}} {
             {% if type.has_free_members_function %}
-                {{as_cppType(type.name)}}() = default;
+                inline {{as_cppType(type.name)}}();
             {% endif %}
     {% endif %}
         {% if type.has_free_members_function %}
@@ -345,6 +508,8 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
             inline {{as_cppType(type.name)}}({{as_cppType(type.name)}}&&);
             inline {{as_cppType(type.name)}}& operator=({{as_cppType(type.name)}}&&);
         {% endif %}
+        inline operator const {{as_cType(type.name)}}&() const noexcept;
+
         {% if type.extensible %}
             ChainedStruct{{Out}} {{const}} * nextInChain = nullptr;
         {% endif %}
@@ -368,12 +533,6 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
 
 {% endfor %}
 
-{%- if metadata.namespace != 'wgpu' %}
-    // The operators of webgpu_enum_class_bitmasks.h are in the wgpu:: namespace,
-    // and need to be imported into this namespace for Argument Dependent Lookup.
-    WGPU_IMPORT_BITMASK_OPERATORS
-{% endif %}
-
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 // error: 'offsetof' within non-standard-layout type '{{metadata.namespace}}::XXX' is conditionally-supported
@@ -383,6 +542,27 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
     {% set CppType = as_cppType(type.name) %}
     {% set CType = as_cType(type.name) %}
     // {{CppType}} implementation
+    {% if type.chained %}
+        {% set Out = "Out" if type.output else "" %}
+        {% set const = "const" if not type.output else "" %}
+        {{CppType}}::{{CppType}}()
+          : ChainedStruct{{Out}} { nullptr, SType::{{type.name.CamelCase()}} } {}
+        struct {{CppType}}::Init {
+            ChainedStruct{{Out}} * {{const}} nextInChain;
+            {% for member in type.members %}
+                {% set member_declaration = as_annotated_cppType(member, type.has_free_members_function) + render_cpp_default_value(member, True, type.has_free_members_function) %}
+                {{member_declaration}};
+            {% endfor %}
+        };
+        {{CppType}}::{{CppType}}({{CppType}}::Init&& init)
+          : ChainedStruct{{Out}} { init.nextInChain, SType::{{type.name.CamelCase()}} }
+            {%- for member in type.members -%},{{" "}}
+                {{as_varName(member.name)}}(std::move(init.{{as_varName(member.name)}}))
+            {%- endfor -%}
+            {}
+    {% elif type.has_free_members_function %}
+        {{CppType}}::{{CppType}}() = default;
+    {% endif %}
     {% if type.has_free_members_function %}
         {{CppType}}::~{{CppType}}() {
             if (
@@ -391,7 +571,7 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
                     this->{{member.name.camelCase()}} != nullptr
                 {%- endfor -%}
             ) {
-                {{as_cMethod(type.name, Name("free members"))}}(
+                {{as_cMethodNamespaced(type.name, Name("free members"), c_namespace)}}(
                     *reinterpret_cast<{{as_cType(type.name)}}*>(this));
             }
         }
@@ -426,6 +606,10 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
         }
     {% endif %}
 
+    {{CppType}}::operator const {{as_cType(type.name)}}&() const noexcept {
+        return *reinterpret_cast<const {{as_cType(type.name)}}*>(this);
+    }
+
     static_assert(sizeof({{CppType}}) == sizeof({{CType}}), "sizeof mismatch for {{CppType}}");
     static_assert(alignof({{CppType}}) == alignof({{CType}}), "alignof mismatch for {{CppType}}");
     {% if type.extensible %}
@@ -449,31 +633,61 @@ static_assert(offsetof(ChainedStruct, sType) == offsetof({{c_prefix}}ChainedStru
     // {{CppType}} implementation
 
     {% for method in type.methods %}
-        {{render_cpp_method_declaration(type, method, dfn=True)}} {
-            {% for arg in method.arguments if arg.type.has_free_members_function and arg.annotation == '*' %}
-                *{{as_varName(arg.name)}} = {{as_cppType(arg.type.name)}}();
-            {% endfor %}
-            {% if method.return_type.name.concatcase() == "void" %}
-                {{render_cpp_to_c_method_call(type, method)}};
-            {% else %}
-                auto result = {{render_cpp_to_c_method_call(type, method)}};
-                return {{convert_cType_to_cppType(method.return_type, 'value', 'result') | indent(8)}};
-            {% endif %}
-        }
+        {% if has_callbackInfoStruct(method) %}
+            {{render_cpp_callback_info_template_method_impl(type, method)}}
+            {{render_cpp_callback_info_lambda_method_impl(type, method)}}
+        {% else %}
+            {{render_cpp_method_impl(type, method)}}
+        {% endif %}
     {% endfor %}
     void {{CppType}}::{{c_prefix}}AddRef({{CType}} handle) {
         if (handle != nullptr) {
-            {{as_cMethod(type.name, Name("add ref"))}}(handle);
+            {{as_cMethodNamespaced(type.name, Name("add ref"), c_namespace)}}(handle);
         }
     }
     void {{CppType}}::{{c_prefix}}Release({{CType}} handle) {
         if (handle != nullptr) {
-            {{as_cMethod(type.name, Name("release"))}}(handle);
+            {{as_cMethodNamespaced(type.name, Name("release"), c_namespace)}}(handle);
         }
     }
     static_assert(sizeof({{CppType}}) == sizeof({{CType}}), "sizeof mismatch for {{CppType}}");
     static_assert(alignof({{CppType}}) == alignof({{CType}}), "alignof mismatch for {{CppType}}");
 
+{% endfor %}
+
+{% if c_namespace %}
+    }  // namespace {{c_namespace.namespace_case()}}
+
+    {% for type in by_category["object"] %}
+        using {{as_cppType(type.name)}} = {{c_namespace.namespace_case()}}::{{as_cppType(type.name)}};
+    {% endfor %}
+
+    {% for type in by_category["structure"] %}
+        using {{as_cppType(type.name)}} = {{c_namespace.namespace_case()}}::{{as_cppType(type.name)}};
+    {% endfor %}
+{% endif %}
+
+{% for typeDef in by_category["typedef"] %}
+    // {{as_cppType(typeDef.name)}} is deprecated.
+    // Use {{as_cppType(typeDef.type.name)}} instead.
+    using {{as_cppType(typeDef.name)}} = {{as_cppType(typeDef.type.name)}};
+{% endfor %}
+
+// Free Functions
+{% for function in by_category["function"] if not function.no_cpp %}
+    static inline {{as_cppType(function.return_type.name)}} {{as_cppType(function.name)}}(
+        {%- for arg in function.arguments -%}
+            {%- if not loop.first %}, {% endif -%}
+            {{as_annotated_cppType(arg)}}{{render_cpp_default_value(arg, False)}}
+        {%- endfor -%}
+    ) {
+        {% if function.return_type.name.concatcase() == "void" %}
+            {{render_function_call(function)}};
+        {% else %}
+            auto result = {{render_function_call(function)}};
+            return {{convert_cType_to_cppType(function.return_type, 'value', 'result')}};
+        {% endif %}
+    }
 {% endfor %}
 
 }  // namespace {{metadata.namespace}}
@@ -499,4 +713,4 @@ struct hash<{{metadata.namespace}}::{{BoolCppType}}> {
 };
 }  // namespace std
 
-#endif // {{API}}_CPP_H_
+#endif // {{PREFIX}}{{API}}_CPP_H_

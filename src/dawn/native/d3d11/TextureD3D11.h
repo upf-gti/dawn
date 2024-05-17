@@ -64,14 +64,6 @@ class Texture final : public d3d::Texture {
     static ResultOrError<Ref<Texture>> Create(Device* device,
                                               const UnpackedPtr<TextureDescriptor>& descriptor,
                                               ComPtr<ID3D11Resource> d3d11Texture);
-    static ResultOrError<Ref<Texture>> CreateExternalImage(
-        Device* device,
-        const UnpackedPtr<TextureDescriptor>& descriptor,
-        ComPtr<IUnknown> d3dTexture,
-        Ref<d3d::KeyedMutex> keyedMutex,
-        std::vector<FenceAndSignalValue> waitFences,
-        bool isSwapChainTexture,
-        bool isInitialized);
     static ResultOrError<Ref<Texture>> CreateFromSharedTextureMemory(
         SharedTextureMemory* memory,
         const UnpackedPtr<TextureDescriptor>& descriptor);
@@ -198,16 +190,14 @@ class Texture final : public d3d::Texture {
     ComPtr<ID3D11Resource> mD3d11Resource;
     Ref<d3d::KeyedMutex> mKeyedMutex;
 
-    // TODO(crbug.com/1515640): Remove this once Chromium has migrated to SharedTextureMemory.
-    std::optional<ExecutionSerial> mLastUsageSerial;
-
     // The internal 'R8Uint' texture for sampling stencil from depth-stencil textures.
     Ref<Texture> mTextureForStencilSampling;
 };
 
 class TextureView final : public TextureViewBase {
   public:
-    static Ref<TextureView> Create(TextureBase* texture, const TextureViewDescriptor* descriptor);
+    static Ref<TextureView> Create(TextureBase* texture,
+                                   const UnpackedPtr<TextureViewDescriptor>& descriptor);
 
     ResultOrError<ID3D11ShaderResourceView*> GetOrCreateD3D11ShaderResourceView();
     ResultOrError<ID3D11RenderTargetView*> GetOrCreateD3D11RenderTargetView(

@@ -204,6 +204,7 @@ option_if_not_defined(DAWN_BUILD_NODE_BINDINGS "Enables building Dawn's NodeJS b
 option_if_not_defined(DAWN_ENABLE_SWIFTSHADER "Enables building Swiftshader as part of the build and Vulkan adapter discovery" OFF)
 option_if_not_defined(DAWN_BUILD_BENCHMARKS "Build Dawn benchmarks" OFF)
 
+option_if_not_defined(DAWN_WERROR "Build with -Werror (or equivalent)" OFF)
 option_if_not_defined(DAWN_ENABLE_PIC "Build with Position-Independent-Code enabled" OFF)
 
 option_if_not_defined(DAWN_EMIT_COVERAGE "Emit code coverage information" OFF)
@@ -232,6 +233,9 @@ option_if_not_defined(TINT_BUILD_SPV_WRITER "Build the SPIR-V output writer" ${D
 option_if_not_defined(TINT_BUILD_WGSL_WRITER "Build the WGSL output writer" ON)
 
 option_if_not_defined(TINT_BUILD_SYNTAX_TREE_WRITER "Build the syntax tree writer" OFF)
+
+option_if_not_defined(TINT_BUILD_IR_BINARY "Build IR binary format support" ON)
+
 
 option_if_not_defined(TINT_BUILD_FUZZERS "Build fuzzers" OFF)
 option_if_not_defined(TINT_BUILD_AST_FUZZER "Build AST fuzzer" OFF)
@@ -384,11 +388,13 @@ function(common_compile_options TARGET)
       -fno-exceptions
       -fno-rtti
 
-#      -Werror
       -Wno-deprecated-builtins
       -Wno-unknown-warning-option
       -Wno-switch-default
     )
+    if (${DAWN_WERROR})
+        target_compile_options(${TARGET} PRIVATE -Werror)
+    endif()
 
     set(SANITIZER_OPTIONS "")
     if (${DAWN_ENABLE_MSAN})
