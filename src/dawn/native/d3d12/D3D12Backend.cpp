@@ -50,10 +50,11 @@ ComPtr<ID3D12CommandQueue> GetD3D12CommandQueue(WGPUDevice device) {
 }
 
 WGPUTexture CreateSwapchainWGPUTexture(WGPUDevice device,
-                                                          const WGPUTextureDescriptor* descriptor,
-                                                          ID3D12Resource* d3dTexture) {
-    auto texture = Texture::CreateExternalImage(ToBackend(FromAPI(device)), ValidateAndUnpack(FromAPI(descriptor)).AcquireSuccess(),
-                                                d3dTexture, {}, {}, true, true);
+                                       const WGPUTextureDescriptor* descriptor,
+                                       ID3D12Resource* d3dTexture) {
+
+    auto texture = Texture::Create(ToBackend(FromAPI(device)), ValidateAndUnpack(FromAPI(descriptor)).AcquireSuccess(),
+                                   d3dTexture);
     if (texture.IsSuccess()) {
         return ToAPI(texture.AcquireSuccess().Detach());
     }
