@@ -562,6 +562,8 @@ MaybeError ValidateTextureDescriptor(
     if (device->IsCompatibilityMode()) {
         const auto textureBindingViewDimension =
             ResolveDefaultCompatiblityTextureBindingViewDimension(device, descriptor);
+        DAWN_TRY_CONTEXT(ValidateTextureViewDimension(textureBindingViewDimension),
+                         "validating resolved compatibility textureBindingViewDimension");
 
         DAWN_INVALID_IF(
             !IsTextureViewDimensionCompatibleWithTextureDimension(textureBindingViewDimension,
@@ -602,7 +604,6 @@ MaybeError ValidateTextureViewDescriptor(const DeviceBase* device,
     DAWN_ASSERT(!texture->IsError());
 
     DAWN_TRY(ValidateTextureViewDimension(descriptor->dimension));
-    // TODO(crbug.com/dawn/2476): Add necessary validation for TextureFormat::External.
     DAWN_TRY(ValidateTextureFormat(descriptor->format));
     DAWN_TRY(ValidateTextureAspect(descriptor->aspect));
 
@@ -633,15 +634,19 @@ MaybeError ValidateTextureViewDescriptor(const DeviceBase* device,
         "texture's mip level count (%u).",
         descriptor->baseMipLevel, descriptor->mipLevelCount, texture->GetNumMipLevels());
 
-    // TODO(crbug.com/dawn/2476): Add necessary validations to CanViewTextureAs for
-    // TextureFormat::External.
-    DAWN_TRY(ValidateCanViewTextureAs(device, texture, *viewFormat, descriptor->aspect));
-    DAWN_TRY(ValidateTextureViewDimensionCompatibility(device, texture, descriptor));
-
     if (descriptor.Get<YCbCrVkDescriptor>()) {
         DAWN_INVALID_IF(!device->HasFeature(Feature::YCbCrVulkanSamplers), "%s is not enabled.",
                         wgpu::FeatureName::YCbCrVulkanSamplers);
+        DAWN_INVALID_IF(format.format != wgpu::TextureFormat::External,
+                        "Texture format (%s) is not (%s).", format.format,
+                        wgpu::TextureFormat::External);
+    } else if (format.format == wgpu::TextureFormat::External) {
+        return DAWN_VALIDATION_ERROR("Invalid TextureViewDescriptor with Texture format (%s).",
+                                     wgpu::TextureFormat::External);
     }
+
+    DAWN_TRY(ValidateCanViewTextureAs(device, texture, *viewFormat, descriptor->aspect));
+    DAWN_TRY(ValidateTextureViewDimensionCompatibility(device, texture, descriptor));
 
     return {};
 }
@@ -681,7 +686,6 @@ ResultOrError<TextureViewDescriptor> GetTextureViewDescriptorWithDefaults(
         }
     }
 
-    // TODO(crbug.com/dawn/2476): Add TextureFormat::External validation.
     if (desc.format == wgpu::TextureFormat::Undefined) {
         const Format& format = texture->GetFormat();
 
@@ -772,14 +776,14 @@ TextureBase::TextureBase(DeviceBase* device, const UnpackedPtr<TextureDescriptor
     GetObjectTrackingList()->Track(this);
 
     // dawn:1569: If a texture with multiple array layers or mip levels is specified as a
-    // texture attachment when this toggle is active, it needs to be given CopyDst usage
+    // texture attachment when this toggle is active, it needs to be given CopySrc | CopyDst usage
     // internally.
     bool applyAlwaysResolveIntoZeroLevelAndLayerToggle =
         device->IsToggleEnabled(Toggle::AlwaysResolveIntoZeroLevelAndLayer) &&
         (GetArrayLayers() > 1 || GetNumMipLevels() > 1) &&
         (GetInternalUsage() & wgpu::TextureUsage::RenderAttachment);
     if (applyAlwaysResolveIntoZeroLevelAndLayerToggle) {
-        AddInternalUsage(wgpu::TextureUsage::CopyDst);
+        AddInternalUsage(wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst);
     }
 
     if (mInternalUsage & wgpu::TextureUsage::CopyDst) {

@@ -35,18 +35,19 @@ namespace {
 
 using namespace tint::core::number_suffixes;  // NOLINT
 using IR_FunctionTest = IRTestHelper;
+using IR_FunctionDeathTest = IR_FunctionTest;
 
-TEST_F(IR_FunctionTest, Fail_NullReturnType) {
+TEST_F(IR_FunctionDeathTest, Fail_NullReturnType) {
     EXPECT_DEATH_IF_SUPPORTED(
         {
             Module mod;
             Builder b{mod};
             b.Function("my_func", nullptr);
         },
-        "");
+        "internal compiler error");
 }
 
-TEST_F(IR_FunctionTest, Fail_DoubleReturnBuiltin) {
+TEST_F(IR_FunctionDeathTest, Fail_DoubleReturnBuiltin) {
     EXPECT_DEATH_IF_SUPPORTED(
         {
             Module mod;
@@ -55,10 +56,10 @@ TEST_F(IR_FunctionTest, Fail_DoubleReturnBuiltin) {
             f->SetReturnBuiltin(BuiltinValue::kFragDepth);
             f->SetReturnBuiltin(BuiltinValue::kPosition);
         },
-        "");
+        "internal compiler error");
 }
 
-TEST_F(IR_FunctionTest, Fail_NullParam) {
+TEST_F(IR_FunctionDeathTest, Fail_NullParam) {
     EXPECT_DEATH_IF_SUPPORTED(
         {
             Module mod;
@@ -66,10 +67,10 @@ TEST_F(IR_FunctionTest, Fail_NullParam) {
             auto* f = b.Function("my_func", mod.Types().void_());
             f->SetParams({nullptr});
         },
-        "");
+        "internal compiler error");
 }
 
-TEST_F(IR_FunctionTest, Fail_NullBlock) {
+TEST_F(IR_FunctionDeathTest, Fail_NullBlock) {
     EXPECT_DEATH_IF_SUPPORTED(
         {
             Module mod;
@@ -77,7 +78,7 @@ TEST_F(IR_FunctionTest, Fail_NullBlock) {
             auto* f = b.Function("my_func", mod.Types().void_());
             f->SetBlock(nullptr);
         },
-        "");
+        "internal compiler error");
 }
 
 TEST_F(IR_FunctionTest, Clone) {
@@ -154,16 +155,23 @@ TEST_F(IR_FunctionTest, Parameters) {
     EXPECT_EQ(param1->Function(), f);
     EXPECT_EQ(param2->Function(), f);
     EXPECT_EQ(param3->Function(), nullptr);
+    EXPECT_EQ(param1->Index(), 0u);
+    EXPECT_EQ(param2->Index(), 1u);
 
     f->SetParams({param1, param3});
     EXPECT_EQ(param1->Function(), f);
     EXPECT_EQ(param2->Function(), nullptr);
     EXPECT_EQ(param3->Function(), f);
+    EXPECT_EQ(param1->Index(), 0u);
+    EXPECT_EQ(param3->Index(), 1u);
 
     f->AppendParam(param2);
     EXPECT_EQ(param1->Function(), f);
     EXPECT_EQ(param2->Function(), f);
     EXPECT_EQ(param3->Function(), f);
+    EXPECT_EQ(param1->Index(), 0u);
+    EXPECT_EQ(param3->Index(), 1u);
+    EXPECT_EQ(param2->Index(), 2u);
 }
 
 }  // namespace

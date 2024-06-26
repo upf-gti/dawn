@@ -28,7 +28,8 @@
 DawnJSONGenerator(
     TARGET "wire"
     PRINT_NAME "Dawn wire"
-    RESULT_VARIABLE "DAWN_WIRE_GEN_SOURCES"
+    OUTPUT_HEADERS DAWN_WIRE_GEN_HEADERS
+    OUTPUT_SOURCES DAWN_WIRE_GEN_SOURCES
 )
 
 add_library(dawn_wire)
@@ -46,6 +47,7 @@ target_sources(dawn_wire PRIVATE
     "${DAWN_INCLUDE_DIR}/dawn/wire/WireServer.h"
     "${DAWN_INCLUDE_DIR}/dawn/wire/dawn_wire_export.h"
   PRIVATE
+    ${DAWN_WIRE_GEN_HEADERS}
     ${DAWN_WIRE_GEN_SOURCES}
     "BufferConsumer.h"
     "BufferConsumer_impl.h"
@@ -111,11 +113,12 @@ target_link_libraries(dawn_wire
     PUBLIC
       dawn_headers
     PRIVATE
-      absl_flat_hash_map
-      absl_flat_hash_set
+      absl::flat_hash_map
+      absl::flat_hash_set
       dawn_common
       dawn_internal_config
       partition_alloc
+      tint_lang_wgsl_features
 )
 
 install_if_enabled(dawn_wire)

@@ -32,6 +32,7 @@
 
 #include "dawn/common/BitSetIterator.h"
 #include "dawn/common/Enumerator.h"
+#include "dawn/common/ityp_array.h"
 #include "dawn/common/ityp_span.h"
 #include "dawn/native/ChainUtils.h"
 #include "dawn/native/CommandValidation.h"
@@ -44,51 +45,53 @@
 
 namespace dawn::native {
 
-static constexpr std::array<VertexFormatInfo, 32> sVertexFormatTable = {{
-    //
-    {wgpu::VertexFormat::Undefined, 0, 0, VertexFormatBaseType::Float},
+static constexpr ityp::array<wgpu::VertexFormat, VertexFormatInfo, 32> sVertexFormatTable =
+    []() constexpr {
+        ityp::array<wgpu::VertexFormat, VertexFormatInfo, 32> table{};
 
-    {wgpu::VertexFormat::Uint8x2, 2, 2, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Uint8x4, 4, 4, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Sint8x2, 2, 2, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Sint8x4, 4, 4, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Unorm8x2, 2, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Unorm8x4, 4, 4, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Snorm8x2, 2, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Snorm8x4, 4, 4, VertexFormatBaseType::Float},
+        // clang-format off
+        table[wgpu::VertexFormat::Uint8x2        ] = { 2, 2, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Uint8x4        ] = { 4, 4, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Sint8x2        ] = { 2, 2, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Sint8x4        ] = { 4, 4, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Unorm8x2       ] = { 2, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Unorm8x4       ] = { 4, 4, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Snorm8x2       ] = { 2, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Snorm8x4       ] = { 4, 4, VertexFormatBaseType::Float};
 
-    {wgpu::VertexFormat::Uint16x2, 4, 2, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Uint16x4, 8, 4, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Sint16x2, 4, 2, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Sint16x4, 8, 4, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Unorm16x2, 4, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Unorm16x4, 8, 4, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Snorm16x2, 4, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Snorm16x4, 8, 4, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Float16x2, 4, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Float16x4, 8, 4, VertexFormatBaseType::Float},
+        table[wgpu::VertexFormat::Uint16x2       ] = { 4, 2, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Uint16x4       ] = { 8, 4, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Sint16x2       ] = { 4, 2, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Sint16x4       ] = { 8, 4, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Unorm16x2      ] = { 4, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Unorm16x4      ] = { 8, 4, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Snorm16x2      ] = { 4, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Snorm16x4      ] = { 8, 4, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Float16x2      ] = { 4, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Float16x4      ] = { 8, 4, VertexFormatBaseType::Float};
 
-    {wgpu::VertexFormat::Float32, 4, 1, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Float32x2, 8, 2, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Float32x3, 12, 3, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Float32x4, 16, 4, VertexFormatBaseType::Float},
-    {wgpu::VertexFormat::Uint32, 4, 1, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Uint32x2, 8, 2, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Uint32x3, 12, 3, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Uint32x4, 16, 4, VertexFormatBaseType::Uint},
-    {wgpu::VertexFormat::Sint32, 4, 1, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Sint32x2, 8, 2, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Sint32x3, 12, 3, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Sint32x4, 16, 4, VertexFormatBaseType::Sint},
-    {wgpu::VertexFormat::Unorm10_10_10_2, 4, 4, VertexFormatBaseType::Float},
-    //
-}};
+        table[wgpu::VertexFormat::Float32        ] = { 4, 1, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Float32x2      ] = { 8, 2, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Float32x3      ] = {12, 3, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Float32x4      ] = {16, 4, VertexFormatBaseType::Float};
+        table[wgpu::VertexFormat::Uint32         ] = { 4, 1, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Uint32x2       ] = { 8, 2, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Uint32x3       ] = {12, 3, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Uint32x4       ] = {16, 4, VertexFormatBaseType::Uint };
+        table[wgpu::VertexFormat::Sint32         ] = { 4, 1, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Sint32x2       ] = { 8, 2, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Sint32x3       ] = {12, 3, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Sint32x4       ] = {16, 4, VertexFormatBaseType::Sint };
+        table[wgpu::VertexFormat::Unorm10_10_10_2] = { 4, 4, VertexFormatBaseType::Float};
+        // clang-format on
+
+        return table;
+    }();
 
 const VertexFormatInfo& GetVertexFormatInfo(wgpu::VertexFormat format) {
-    DAWN_ASSERT(format != wgpu::VertexFormat::Undefined);
-    DAWN_ASSERT(static_cast<uint32_t>(format) < sVertexFormatTable.size());
-    DAWN_ASSERT(sVertexFormatTable[static_cast<uint32_t>(format)].format == format);
-    return sVertexFormatTable[static_cast<uint32_t>(format)];
+    DAWN_ASSERT(static_cast<uint32_t>(format) < static_cast<uint32_t>(sVertexFormatTable.size()));
+    DAWN_ASSERT(static_cast<uint32_t>(format) != 0u);
+    return sVertexFormatTable[format];
 }
 
 // Helper functions
@@ -436,10 +439,35 @@ MaybeError ValidateBlendState(DeviceBase* device, const BlendState* descriptor) 
     return {};
 }
 
-bool BlendFactorContainsSrcAlpha(const wgpu::BlendFactor& blendFactor) {
+bool BlendFactorContainsSrcAlpha(wgpu::BlendFactor blendFactor) {
     return blendFactor == wgpu::BlendFactor::SrcAlpha ||
            blendFactor == wgpu::BlendFactor::OneMinusSrcAlpha ||
            blendFactor == wgpu::BlendFactor::SrcAlphaSaturated;
+}
+
+bool BlendFactorContainsSrc1Alpha(wgpu::BlendFactor blendFactor) {
+    return blendFactor == wgpu::BlendFactor::Src1Alpha ||
+           blendFactor == wgpu::BlendFactor::OneMinusSrc1Alpha;
+}
+
+bool BlendFactorContainsSrc1(wgpu::BlendFactor blendFactor) {
+    return blendFactor == wgpu::BlendFactor::Src1 ||
+           blendFactor == wgpu::BlendFactor::OneMinusSrc1 ||
+           BlendFactorContainsSrc1Alpha(blendFactor);
+}
+
+bool BlendStateUsesBlendFactorSrc1(const BlendState& blend) {
+    return BlendFactorContainsSrc1(blend.alpha.srcFactor) ||
+           BlendFactorContainsSrc1(blend.alpha.dstFactor) ||
+           BlendFactorContainsSrc1(blend.color.srcFactor) ||
+           BlendFactorContainsSrc1(blend.color.dstFactor);
+}
+
+bool BlendStateUsesBlendFactorSrc1Alpha(const BlendState& blend) {
+    return BlendFactorContainsSrc1Alpha(blend.alpha.srcFactor) ||
+           BlendFactorContainsSrc1Alpha(blend.alpha.dstFactor) ||
+           BlendFactorContainsSrc1Alpha(blend.color.srcFactor) ||
+           BlendFactorContainsSrc1Alpha(blend.color.dstFactor);
 }
 
 MaybeError ValidateColorTargetState(
@@ -629,6 +657,9 @@ ResultOrError<ShaderModuleEntryPoint> ValidateFragmentState(DeviceBase* device,
         }
     }
 
+    bool usesSrc1 = false;
+    bool usesSrc1Alpha = false;
+    uint8_t blendSrc1ComponentCount = 0;
     ColorAttachmentFormats colorAttachmentFormats;
     for (auto i : IterateBitSet(targetMask)) {
         const Format* format;
@@ -640,11 +671,31 @@ ResultOrError<ShaderModuleEntryPoint> ValidateFragmentState(DeviceBase* device,
                          "validating targets[%u] framebuffer output.", i);
         colorAttachmentFormats.push_back(&device->GetValidInternalFormat(targets[i].format));
 
+        if (fragmentMetadata.fragmentOutputVariables[i].blendSrc == 1u) {
+            blendSrc1ComponentCount = fragmentMetadata.fragmentOutputVariables[i].componentCount;
+        }
+
         if (fragmentMetadata.fragmentInputMask[i]) {
             DAWN_TRY_CONTEXT(ValidateFramebufferInput(device, format,
                                                       fragmentMetadata.fragmentInputVariables[i]),
                              "validating targets[%u]'s framebuffer input.", i);
         }
+
+        if (targets[i].blend != nullptr) {
+            usesSrc1 |= BlendStateUsesBlendFactorSrc1(*targets[i].blend);
+            usesSrc1Alpha |= BlendStateUsesBlendFactorSrc1Alpha(*targets[i].blend);
+        }
+    }
+
+    if (usesSrc1) {
+        DAWN_INVALID_IF(blendSrc1ComponentCount == 0,
+                        "One of the blend factor uses `blend_src(1)` while `blend_src(1)` is "
+                        "missing from the fragment shader outputs.");
+
+        DAWN_INVALID_IF(usesSrc1Alpha && blendSrc1ComponentCount < 4u,
+                        "One of the blend factor is reading the alpha of the fragment shader "
+                        "output with `blend_src(1)` but it is missing from that fragment shader "
+                        "output.");
     }
 
     auto extraFramebufferInputs = fragmentMetadata.fragmentInputMask & ~targetMask;
@@ -675,16 +726,6 @@ ResultOrError<ShaderModuleEntryPoint> ValidateFragmentState(DeviceBase* device,
     }
 
     if (device->IsCompatibilityMode()) {
-        DAWN_INVALID_IF(
-            fragmentMetadata.usesSampleMaskOutput,
-            "sample_mask is not supported in compatibility mode in the fragment stage (%s, %s)",
-            descriptor->module, &entryPoint);
-
-        DAWN_INVALID_IF(
-            fragmentMetadata.usesSampleIndex,
-            "sample_index is not supported in compatibility mode in the fragment stage (%s, %s)",
-            descriptor->module, &entryPoint);
-
         // Check that all the color target states match.
         ColorAttachmentIndex firstColorTargetIndex{};
         const ColorTargetState* firstColorTargetState = nullptr;
@@ -756,18 +797,6 @@ MaybeError ValidateInterStageMatching(DeviceBase* device,
             "different from the interpolation sampling (%s) of the fragment input at "
             "location %u.",
             vertexOutputInfo.interpolationSampling, i, fragmentInputInfo.interpolationSampling, i);
-
-        DAWN_INVALID_IF(device->IsCompatibilityMode() &&
-                            vertexOutputInfo.interpolationType == InterpolationType::Linear,
-                        "The interpolation type (%s) of the vertex output at location %u is not "
-                        "supported in compatibility mode",
-                        vertexOutputInfo.interpolationType, i);
-
-        DAWN_INVALID_IF(device->IsCompatibilityMode() &&
-                            vertexOutputInfo.interpolationSampling == InterpolationSampling::Sample,
-                        "The interpolation sampling (%s) of the vertex output at location %u is "
-                        "not supported in compatibility mode",
-                        vertexOutputInfo.interpolationSampling, i);
     }
 
     return {};

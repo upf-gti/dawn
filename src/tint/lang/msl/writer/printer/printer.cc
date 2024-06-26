@@ -27,6 +27,8 @@
 
 #include "src/tint/lang/msl/writer/printer/printer.h"
 
+#include <atomic>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -85,7 +87,14 @@
 #include "src/tint/lang/core/type/vector.h"
 #include "src/tint/lang/core/type/void.h"
 #include "src/tint/lang/msl/barrier_type.h"
+#include "src/tint/lang/msl/builtin_fn.h"
 #include "src/tint/lang/msl/ir/builtin_call.h"
+#include "src/tint/lang/msl/ir/component.h"
+#include "src/tint/lang/msl/ir/member_builtin_call.h"
+#include "src/tint/lang/msl/ir/memory_order.h"
+#include "src/tint/lang/msl/type/bias.h"
+#include "src/tint/lang/msl/type/gradient.h"
+#include "src/tint/lang/msl/type/level.h"
 #include "src/tint/lang/msl/writer/common/printer_support.h"
 #include "src/tint/utils/containers/map.h"
 #include "src/tint/utils/generator/text_generator.h"
@@ -106,7 +115,7 @@ class Printer : public tint::TextGenerator {
     explicit Printer(core::ir::Module& module) : ir_(module) {}
 
     /// @returns the generated MSL shader
-    tint::Result<std::string> Generate() {
+    tint::Result<PrintResult> Generate() {
         auto valid = core::ir::ValidateAndDumpIfNeeded(ir_, "MSL writer");
         if (valid != Success) {
             return std::move(valid.Failure());
@@ -127,11 +136,16 @@ class Printer : public tint::TextGenerator {
         }
 
         StringStream ss;
-        ss << preamble_buffer_.String() << std::endl << main_buffer_.String();
-        return ss.str();
+        ss << preamble_buffer_.String() << main_buffer_.String();
+        result_.msl = ss.str();
+
+        return std::move(result_);
     }
 
   private:
+    /// The result of printing the module.
+    PrintResult result_;
+
     /// Map of builtin structure to unique generated name
     std::unordered_map<const core::type::Struct*, std::string> builtin_struct_names_;
 
@@ -170,6 +184,7 @@ class Printer : public tint::TextGenerator {
         array_template_name_ = UniqueIdentifier("tint_array");
 
         TINT_SCOPED_ASSIGNMENT(current_buffer_, &preamble_buffer_);
+        Line();
         Line() << "template<typename T, size_t N>";
         Line() << "struct " << array_template_name_ << " {";
 
@@ -186,7 +201,6 @@ class Printer : public tint::TextGenerator {
             Line() << "T elements[N];";
         }
         Line() << "};";
-        Line();
 
         return array_template_name_;
     }
@@ -250,8 +264,11 @@ class Printer : public tint::TextGenerator {
     void EmitFunction(const core::ir::Function* func) {
         TINT_SCOPED_ASSIGNMENT(current_function_, func);
 
+        Line();
         {
             auto out = Line();
+
+            auto func_name = NameOf(func);
 
             switch (func->Stage()) {
                 case core::ir::Function::PipelineStage::kCompute:
@@ -266,11 +283,14 @@ class Printer : public tint::TextGenerator {
                 case core::ir::Function::PipelineStage::kUndefined:
                     break;
             }
+            if (func->Stage() != core::ir::Function::PipelineStage::kUndefined) {
+                result_.workgroup_allocations.insert({func_name, {}});
+            }
 
             // TODO(dsinclair): Handle return type attributes
 
             EmitType(out, func->ReturnType());
-            out << " " << NameOf(func) << "(";
+            out << " " << func_name << "(";
 
             size_t i = 0;
             for (auto* param : func->Params()) {
@@ -279,7 +299,6 @@ class Printer : public tint::TextGenerator {
                 }
                 ++i;
 
-                // TODO(dsinclair): Handle parameter attributes
                 EmitType(out, param->Type());
                 out << " ";
 
@@ -291,55 +310,48 @@ class Printer : public tint::TextGenerator {
 
                 out << NameOf(param);
 
-                if (param->Builtin().has_value()) {
-                    out << " [[";
-                    switch (param->Builtin().value()) {
-                        case core::BuiltinValue::kFrontFacing:
-                            out << "front_facing";
-                            break;
-                        case core::BuiltinValue::kGlobalInvocationId:
-                            out << "thread_position_in_grid";
-                            break;
-                        case core::BuiltinValue::kLocalInvocationId:
-                            out << "thread_position_in_threadgroup";
-                            break;
-                        case core::BuiltinValue::kLocalInvocationIndex:
-                            out << "thread_index_in_threadgroup";
-                            break;
-                        case core::BuiltinValue::kNumWorkgroups:
-                            out << "threadgroups_per_grid";
-                            break;
-                        case core::BuiltinValue::kPosition:
-                            out << "position";
-                            break;
-                        case core::BuiltinValue::kSampleIndex:
-                            out << "sample_id";
-                            break;
-                        case core::BuiltinValue::kSampleMask:
-                            out << "sample_mask";
-                            break;
-                        case core::BuiltinValue::kWorkgroupId:
-                            out << "threadgroup_position_in_grid";
-                            break;
-
-                        default:
-                            break;
-                    }
-                    out << "]]";
+                if (auto builtin = param->Builtin()) {
+                    auto name = BuiltinToAttribute(builtin.value());
+                    TINT_ASSERT(!name.empty());
+                    out << " [[" << name << "]]";
                 }
 
+                if (param->Type()->Is<core::type::Struct>() &&
+                    func->Stage() != core::ir::Function::PipelineStage::kUndefined) {
+                    out << " [[stage_in]]";
+                }
+
+                auto ptr = param->Type()->As<core::type::Pointer>();
                 if (auto binding_point = param->BindingPoint()) {
-                    auto ptr = param->Type()->As<core::type::Pointer>();
                     TINT_ASSERT(binding_point->group == 0);
-                    switch (ptr->AddressSpace()) {
-                        case core::AddressSpace::kStorage:
-                        case core::AddressSpace::kUniform:
-                            out << " [[buffer(" << binding_point->binding << ")]]";
-                            break;
-                        default:
-                            TINT_UNREACHABLE() << "invalid address space with binding point: "
-                                               << ptr->AddressSpace();
+                    if (ptr) {
+                        switch (ptr->AddressSpace()) {
+                            case core::AddressSpace::kStorage:
+                            case core::AddressSpace::kUniform:
+                                out << " [[buffer(" << binding_point->binding << ")]]";
+                                break;
+                            default:
+                                TINT_UNREACHABLE() << "invalid address space with binding point: "
+                                                   << ptr->AddressSpace();
+                        }
+                    } else {
+                        // Handle types are declared by value instead of by pointer.
+                        Switch(
+                            param->Type(),
+                            [&](const core::type::Texture*) {
+                                out << " [[texture(" << binding_point->binding << ")]]";
+                            },
+                            [&](const core::type::Sampler*) {
+                                out << " [[sampler(" << binding_point->binding << ")]]";
+                            },
+                            TINT_ICE_ON_NO_MATCH);
                     }
+                }
+                if (ptr && ptr->AddressSpace() == core::AddressSpace::kWorkgroup &&
+                    func->Stage() == core::ir::Function::PipelineStage::kCompute) {
+                    auto& allocations = result_.workgroup_allocations.at(func_name);
+                    out << " [[threadgroup(" << allocations.size() << ")]]";
+                    allocations.push_back(ptr->StoreType()->Size());
                 }
             }
 
@@ -364,23 +376,23 @@ class Printer : public tint::TextGenerator {
 
         for (auto* inst : *block) {
             Switch(
-                inst,                                                      //
-                [&](const core::ir::BreakIf* i) { EmitBreakIf(i); },       //
-                [&](const core::ir::Continue*) { EmitContinue(); },        //
-                [&](const core::ir::Discard*) { EmitDiscard(); },          //
-                [&](const core::ir::ExitIf* i) { EmitExitIf(i); },         //
-                [&](const core::ir::ExitLoop*) { EmitExitLoop(); },        //
-                [&](const core::ir::ExitSwitch*) { EmitExitSwitch(); },    //
-                [&](const core::ir::If* i) { EmitIf(i); },                 //
-                [&](const core::ir::Let* i) { EmitLet(i); },               //
-                [&](const core::ir::Loop* i) { EmitLoop(i); },             //
-                [&](const core::ir::NextIteration*) { /* do nothing */ },  //
-                [&](const core::ir::Return* i) { EmitReturn(i); },         //
-                [&](const core::ir::Store* i) { EmitStore(i); },           //
-                [&](const core::ir::Switch* i) { EmitSwitch(i); },         //
-                [&](const core::ir::Unreachable*) { EmitUnreachable(); },  //
-                [&](const core::ir::Call* i) { EmitCallStmt(i); },         //
-                [&](const core::ir::Var* i) { EmitVar(i); },               //
+                inst,                                                                    //
+                [&](const core::ir::BreakIf* i) { EmitBreakIf(i); },                     //
+                [&](const core::ir::Continue*) { EmitContinue(); },                      //
+                [&](const core::ir::Discard*) { EmitDiscard(); },                        //
+                [&](const core::ir::ExitIf*) { /* do nothing handled by transform */ },  //
+                [&](const core::ir::ExitLoop*) { EmitExitLoop(); },                      //
+                [&](const core::ir::ExitSwitch*) { EmitExitSwitch(); },                  //
+                [&](const core::ir::If* i) { EmitIf(i); },                               //
+                [&](const core::ir::Let* i) { EmitLet(i); },                             //
+                [&](const core::ir::Loop* i) { EmitLoop(i); },                           //
+                [&](const core::ir::NextIteration*) { /* do nothing */ },                //
+                [&](const core::ir::Return* i) { EmitReturn(i); },                       //
+                [&](const core::ir::Store* i) { EmitStore(i); },                         //
+                [&](const core::ir::Switch* i) { EmitSwitch(i); },                       //
+                [&](const core::ir::Unreachable*) { EmitUnreachable(); },                //
+                [&](const core::ir::Call* i) { EmitCallStmt(i); },                       //
+                [&](const core::ir::Var* i) { EmitVar(i); },                             //
                 [&](const core::ir::StoreVectorElement* e) { EmitStoreVectorElement(e); },
                 [&](const core::ir::TerminateInvocation*) { EmitDiscard(); },  //
 
@@ -402,17 +414,20 @@ class Printer : public tint::TextGenerator {
             [&](const core::ir::Constant* c) { EmitConstant(out, c); },  //
             [&](const core::ir::InstructionResult* r) {
                 Switch(
-                    r->Instruction(),                                                          //
-                    [&](const core::ir::CoreBinary* b) { EmitBinary(out, b); },                //
-                    [&](const core::ir::CoreUnary* u) { EmitUnary(out, u); },                  //
-                    [&](const core::ir::Convert* b) { EmitConvert(out, b); },                  //
-                    [&](const core::ir::Let* l) { out << NameOf(l->Result(0)); },              //
-                    [&](const core::ir::Load* l) { EmitLoad(out, l); },                        //
-                    [&](const core::ir::Construct* c) { EmitConstruct(out, c); },              //
-                    [&](const core::ir::Var* var) { out << NameOf(var->Result(0)); },          //
-                    [&](const core::ir::Bitcast* b) { EmitBitcast(out, b); },                  //
-                    [&](const core::ir::Access* a) { EmitAccess(out, a); },                    //
-                    [&](const msl::ir::BuiltinCall* c) { EmitMslBuiltinCall(out, c); },        //
+                    r->Instruction(),                                                    //
+                    [&](const core::ir::CoreBinary* b) { EmitBinary(out, b); },          //
+                    [&](const core::ir::CoreUnary* u) { EmitUnary(out, u); },            //
+                    [&](const core::ir::Convert* b) { EmitConvert(out, b); },            //
+                    [&](const core::ir::Let* l) { out << NameOf(l->Result(0)); },        //
+                    [&](const core::ir::Load* l) { EmitLoad(out, l); },                  //
+                    [&](const core::ir::Construct* c) { EmitConstruct(out, c); },        //
+                    [&](const core::ir::Var* var) { out << NameOf(var->Result(0)); },    //
+                    [&](const core::ir::Bitcast* b) { EmitBitcast(out, b); },            //
+                    [&](const core::ir::Access* a) { EmitAccess(out, a); },              //
+                    [&](const msl::ir::BuiltinCall* c) { EmitMslBuiltinCall(out, c); },  //
+                    [&](const msl::ir::MemberBuiltinCall* c) {
+                        EmitMslMemberBuiltinCall(out, c);
+                    },                                                                         //
                     [&](const core::ir::CoreBuiltinCall* c) { EmitCoreBuiltinCall(out, c); },  //
                     [&](const core::ir::UserCall* c) { EmitUserCall(out, c); },                //
                     [&](const core::ir::LoadVectorElement* e) {
@@ -433,6 +448,9 @@ class Printer : public tint::TextGenerator {
             case core::UnaryOp::kComplement:
                 out << "~";
                 break;
+            case core::UnaryOp::kNot:
+                out << "!";
+                break;
             default:
                 TINT_UNIMPLEMENTED() << u->Op();
         }
@@ -444,18 +462,6 @@ class Printer : public tint::TextGenerator {
     /// Emit a binary instruction
     /// @param b the binary instruction
     void EmitBinary(StringStream& out, const core::ir::CoreBinary* b) {
-        if (b->Op() == core::BinaryOp::kEqual) {
-            auto* rhs = b->RHS()->As<core::ir::Constant>();
-            if (rhs && rhs->Type()->Is<core::type::Bool>() &&
-                rhs->Value()->ValueAs<bool>() == false) {
-                // expr == false
-                out << "!(";
-                EmitValue(out, b->LHS());
-                out << ")";
-                return;
-            }
-        }
-
         auto kind = [&] {
             switch (b->Op()) {
                 case core::BinaryOp::kAdd:
@@ -566,9 +572,9 @@ class Printer : public tint::TextGenerator {
 
     void EmitBreakIf(const core::ir::BreakIf* b) {
         auto out = Line();
-        out << "if ";
+        out << "if (";
         EmitValue(out, b->Condition());
-        out << " { break; }";
+        out << ") { break; }";
     }
 
     void EmitContinue() {
@@ -589,7 +595,14 @@ class Printer : public tint::TextGenerator {
         //   }
         // }
 
-        auto emit_continuing = [&] { EmitBlock(l->Continuing()); };
+        auto emit_continuing = [&] {
+            Line() << "{";
+            {
+                const ScopedIndent si(current_buffer_);
+                EmitBlock(l->Continuing());
+            }
+            Line() << "}";
+        };
         TINT_SCOPED_ASSIGNMENT(emit_continuing_, emit_continuing);
 
         Line() << "{";
@@ -706,22 +719,6 @@ class Printer : public tint::TextGenerator {
         Line() << "}";
     }
 
-    /// Emit an exit-if instruction
-    /// @param e the exit-if instruction
-    void EmitExitIf(const core::ir::ExitIf* e) {
-        auto results = e->If()->Results();
-        auto args = e->Args();
-        for (size_t i = 0; i < e->Args().Length(); ++i) {
-            auto* phi = results[i];
-            auto* val = args[i];
-
-            auto out = Line();
-            out << NameOf(phi) << " = ";
-            EmitValue(out, val);
-            out << ";";
-        }
-    }
-
     /// Emit a return instruction
     /// @param r the return instruction
     void EmitReturn(const core::ir::Return* r) {
@@ -805,33 +802,54 @@ class Printer : public tint::TextGenerator {
     }
 
     void EmitMslBuiltinCall(StringStream& out, const msl::ir::BuiltinCall* c) {
-        switch (c->Func()) {
-            case msl::BuiltinFn::kThreadgroupBarrier: {
-                auto flags = c->Args()[0]->As<core::ir::Constant>()->Value()->ValueAs<uint8_t>();
-                out << "threadgroup_barrier(";
-                bool emitted_flag = false;
+        if (c->Func() == msl::BuiltinFn::kThreadgroupBarrier) {
+            auto flags = c->Args()[0]->As<core::ir::Constant>()->Value()->ValueAs<uint8_t>();
+            out << "threadgroup_barrier(";
+            bool emitted_flag = false;
 
-                auto emit = [&](BarrierType type, const std::string& name) {
-                    if ((flags & type) != type) {
-                        return;
-                    }
+            auto emit = [&](BarrierType type, const std::string& name) {
+                if ((flags & type) != type) {
+                    return;
+                }
 
-                    if (emitted_flag) {
-                        out << " | ";
-                    }
-                    emitted_flag = true;
-                    out << "mem_flags::mem_" << name;
-                };
-                emit(BarrierType::kDevice, "device");
-                emit(BarrierType::kThreadGroup, "threadgroup");
-                emit(BarrierType::kTexture, "texture");
+                if (emitted_flag) {
+                    out << " | ";
+                }
+                emitted_flag = true;
+                out << "mem_flags::mem_" << name;
+            };
+            emit(BarrierType::kDevice, "device");
+            emit(BarrierType::kThreadGroup, "threadgroup");
+            emit(BarrierType::kTexture, "texture");
 
-                out << ")";
-                return;
-            }
-            default:
-                TINT_ICE() << "undefined MSL ir function";
+            out << ")";
+            return;
         }
+
+        out << c->Func() << "(";
+        bool needs_comma = false;
+        for (const auto* arg : c->Args()) {
+            if (needs_comma) {
+                out << ", ";
+            }
+            EmitAndTakeAddressIfNeeded(out, arg);
+            needs_comma = true;
+        }
+        out << ")";
+    }
+
+    void EmitMslMemberBuiltinCall(StringStream& out, const msl::ir::MemberBuiltinCall* c) {
+        EmitValue(out, c->Object());
+        out << "." << c->Func() << "(";
+        bool needs_comma = false;
+        for (const auto* arg : c->Args()) {
+            if (needs_comma) {
+                out << ", ";
+            }
+            EmitAndTakeAddressIfNeeded(out, arg);
+            needs_comma = true;
+        }
+        out << ")";
     }
 
     void EmitCoreBuiltinCall(StringStream& out, const core::ir::CoreBuiltinCall* c) {
@@ -852,6 +870,7 @@ class Printer : public tint::TextGenerator {
 
     void EmitCoreBuiltinName(StringStream& out, core::BuiltinFn func) {
         switch (func) {
+            case core::BuiltinFn::kAbs:
             case core::BuiltinFn::kAcos:
             case core::BuiltinFn::kAcosh:
             case core::BuiltinFn::kAll:
@@ -879,7 +898,6 @@ class Printer : public tint::TextGenerator {
             case core::BuiltinFn::kMin:
             case core::BuiltinFn::kMix:
             case core::BuiltinFn::kNormalize:
-            case core::BuiltinFn::kPow:
             case core::BuiltinFn::kReflect:
             case core::BuiltinFn::kRefract:
             case core::BuiltinFn::kSaturate:
@@ -894,6 +912,9 @@ class Printer : public tint::TextGenerator {
             case core::BuiltinFn::kTranspose:
             case core::BuiltinFn::kTrunc:
                 out << func;
+                break;
+            case core::BuiltinFn::kPow:
+                out << "powr";
                 break;
             case core::BuiltinFn::kCountLeadingZeros:
                 out << "clz";
@@ -1002,16 +1023,26 @@ class Printer : public tint::TextGenerator {
                 out << "}";
             },
             [&](const core::type::Struct* struct_ty) {
+                EmitStructType(struct_ty);
+                out << StructName(struct_ty);
                 out << "{";
                 size_t i = 0;
+                bool needs_comma = false;
                 for (auto* arg : c->Args()) {
-                    if (i > 0) {
+                    if (arg == nullptr) {
+                        // Skip `undef` values.
+                        i++;
+                        continue;
+                    }
+                    if (needs_comma) {
                         out << ", ";
                     }
-                    // Emit field designators for structures to account for padding members.
+                    // Emit field designators for structures so that we can skip padding members and
+                    // arguments that are `undef` values.
                     auto name = struct_ty->Members()[i]->Name().Name();
                     out << "." << name << "=";
                     EmitAndTakeAddressIfNeeded(out, arg);
+                    needs_comma = true;
                     i++;
                 }
                 out << "}";
@@ -1038,7 +1069,6 @@ class Printer : public tint::TextGenerator {
         switch (sc) {
             case core::AddressSpace::kFunction:
             case core::AddressSpace::kPrivate:
-            case core::AddressSpace::kHandle:
                 out << "thread";
                 break;
             case core::AddressSpace::kWorkgroup:
@@ -1080,6 +1110,25 @@ class Printer : public tint::TextGenerator {
                 TINT_SCOPED_ASSIGNMENT(current_buffer_, &preamble_buffer_);
                 EmitStructType(str);
             },  //
+
+            // MSL builtin types.
+            [&](const msl::type::Bias*) { out << "bias"; },  //
+            [&](const msl::type::Gradient* g) {
+                out << "gradient";
+                switch (g->Dim()) {
+                    case type::Gradient::Dim::k2d:
+                        out << "2d";
+                        break;
+                    case type::Gradient::Dim::k3d:
+                        out << "3d";
+                        break;
+                    case type::Gradient::Dim::kCube:
+                        out << "cube";
+                        break;
+                }
+            },                                                 //
+            [&](const msl::type::Level*) { out << "level"; },  //
+
             TINT_ICE_ON_NO_MATCH);
     }
 
@@ -1202,6 +1251,8 @@ class Printer : public tint::TextGenerator {
                 std::string access_str;
                 if (storage->access() == core::Access::kRead) {
                     out << "access::read";
+                } else if (storage->access() == core::Access::kReadWrite) {
+                    out << "access::read_write";
                 } else if (storage->access() == core::Access::kWrite) {
                     out << "access::write";
                 } else {
@@ -1233,7 +1284,7 @@ class Printer : public tint::TextGenerator {
         // temporary text buffer, then anything it depends on will emit to the preamble first,
         // and then it copies the text buffer into the preamble.
         TextBuffer str_buf;
-        Line(&str_buf) << "struct " << StructName(str) << " {";
+        Line(&str_buf) << "\n" << "struct " << StructName(str) << " {";
 
         bool is_host_shareable = str->IsHostShareable();
 
@@ -1302,16 +1353,19 @@ class Printer : public tint::TextGenerator {
                 }
 
                 if (pipeline_stage_uses.Contains(core::type::PipelineStageUsage::kVertexInput)) {
-                    out << " [[attribute(" + std::to_string(location.value()) + ")]]";
+                    out << " [[attribute(" << location.value() << ")]]";
                 } else if (pipeline_stage_uses.Contains(
                                core::type::PipelineStageUsage::kVertexOutput)) {
-                    out << " [[user(locn" + std::to_string(location.value()) + ")]]";
+                    out << " [[user(locn" << location.value() << ")]]";
                 } else if (pipeline_stage_uses.Contains(
                                core::type::PipelineStageUsage::kFragmentInput)) {
-                    out << " [[user(locn" + std::to_string(location.value()) + ")]]";
+                    out << " [[user(locn" << location.value() << ")]]";
                 } else if (TINT_LIKELY(pipeline_stage_uses.Contains(
                                core::type::PipelineStageUsage::kFragmentOutput))) {
-                    out << " [[color(" + std::to_string(location.value()) + ")]]";
+                    out << " [[color(" << location.value() << ")]]";
+                    if (auto blend_src = attributes.blend_src) {
+                        out << " [[index(" << blend_src.value() << ")]]";
+                    }
                 } else {
                     TINT_IR_ICE(ir_) << "invalid use of location decoration";
                 }
@@ -1358,6 +1412,33 @@ class Printer : public tint::TextGenerator {
     /// @param out the stream to write the constant too
     /// @param c the constant to emit
     void EmitConstant(StringStream& out, const core::ir::Constant* c) {
+        // Special cases for enum values.
+        if (auto* order = c->As<msl::ir::Component>()) {
+            switch (order->Value()->ValueAs<uint32_t>()) {
+                case 0:
+                    out << "component::x";
+                    break;
+                case 1:
+                    out << "component::y";
+                    break;
+                case 2:
+                    out << "component::z";
+                    break;
+                case 3:
+                    out << "component::w";
+                    break;
+                default:
+                    TINT_UNREACHABLE();
+            }
+            return;
+        }
+        if (auto* order = c->As<msl::ir::MemoryOrder>()) {
+            TINT_ASSERT(order->Value()->ValueAs<u32>() ==
+                        static_cast<u32>(std::memory_order_relaxed));
+            out << "memory_order_relaxed";
+            return;
+        }
+
         EmitConstant(out, c->Value());
     }
 
@@ -1489,8 +1570,16 @@ class Printer : public tint::TextGenerator {
 
 }  // namespace
 
-Result<std::string> Print(core::ir::Module& module) {
+Result<PrintResult> Print(core::ir::Module& module) {
     return Printer{module}.Generate();
 }
+
+PrintResult::PrintResult() = default;
+
+PrintResult::~PrintResult() = default;
+
+PrintResult::PrintResult(const PrintResult&) = default;
+
+PrintResult& PrintResult::operator=(const PrintResult&) = default;
 
 }  // namespace tint::msl::writer

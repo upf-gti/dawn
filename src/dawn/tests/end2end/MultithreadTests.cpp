@@ -202,25 +202,19 @@ TEST_P(MultithreadTests, Buffers_MapInParallel) {
     constexpr uint32_t kSize = static_cast<uint32_t>(kDataSize * sizeof(uint32_t));
 
     utils::RunInParallel(10, [=, &myData = std::as_const(myData)](uint32_t) {
-        wgpu::Buffer buffer;
-        std::atomic<bool> mapCompleted(false);
-
         // Create buffer and request mapping.
-        buffer = CreateBuffer(kSize, wgpu::BufferUsage::MapWrite | wgpu::BufferUsage::CopySrc);
-
-        buffer.MapAsync(
-            wgpu::MapMode::Write, 0, kSize,
-            [](WGPUBufferMapAsyncStatus status, void* userdata) {
-                EXPECT_EQ(WGPUBufferMapAsyncStatus_Success, status);
-                (*static_cast<std::atomic<bool>*>(userdata)) = true;
-            },
-            &mapCompleted);
+        wgpu::Buffer buffer =
+            CreateBuffer(kSize, wgpu::BufferUsage::MapWrite | wgpu::BufferUsage::CopySrc);
 
         // Wait for the mapping to complete
-        while (!mapCompleted.load()) {
-            device.Tick();
-            FlushWire();
-        }
+        ASSERT_EQ(instance.WaitAny(buffer.MapAsync(wgpu::MapMode::Write, 0, kSize,
+                                                   wgpu::CallbackMode::AllowProcessEvents,
+                                                   [](wgpu::MapAsyncStatus status, const char*) {
+                                                       ASSERT_EQ(status,
+                                                                 wgpu::MapAsyncStatus::Success);
+                                                   }),
+                                   UINT64_MAX),
+                  wgpu::WaitStatus::Success);
 
         // Buffer is mapped, write into it and unmap .
         memcpy(buffer.GetMappedRange(0, kSize), myData.data(), kSize);
@@ -260,13 +254,15 @@ TEST_P(MultithreadTests, CreateShaderModuleInParallel) {
     for (uint32_t index = 0; index < shaderModules.size(); ++index) {
         uint32_t sourceIndex = index / kCacheHitFactor;
         shaderModules[index].GetCompilationInfo(
-            [](WGPUCompilationInfoRequestStatus, const WGPUCompilationInfo* info, void* userdata) {
+            wgpu::CallbackMode::AllowProcessEvents,
+            [sourceIndex](wgpu::CompilationInfoRequestStatus status,
+                          const wgpu::CompilationInfo* info) {
+                ASSERT_EQ(wgpu::CompilationInfoRequestStatus::Success, status);
                 for (size_t i = 0; i < info->messageCount; ++i) {
                     EXPECT_THAT(info->messages[i].message, testing::HasSubstr("unreachable"));
-                    EXPECT_EQ(info->messages[i].lineNum, 5u + *static_cast<uint32_t*>(userdata));
+                    EXPECT_EQ(info->messages[i].lineNum, 5u + sourceIndex);
                 }
-            },
-            &sourceIndex);
+            });
     }
 }
 
@@ -307,18 +303,15 @@ TEST_P(MultithreadTests, CreateComputePipelineAsyncInParallel) {
             wgpu::ComputePipeline computePipeline;
             std::atomic<bool> isCompleted{false};
         } task;
-        device.CreateComputePipelineAsync(
-            &csDesc,
-            [](WGPUCreatePipelineAsyncStatus status, WGPUComputePipeline returnPipeline,
-               const char* message, void* userdata) {
-                EXPECT_EQ(WGPUCreatePipelineAsyncStatus::WGPUCreatePipelineAsyncStatus_Success,
-                          status);
+        device.CreateComputePipelineAsync(&csDesc, wgpu::CallbackMode::AllowProcessEvents,
+                                          [&task](wgpu::CreatePipelineAsyncStatus status,
+                                                  wgpu::ComputePipeline pipeline, const char*) {
+                                              EXPECT_EQ(wgpu::CreatePipelineAsyncStatus::Success,
+                                                        status);
 
-                auto task = static_cast<Task*>(userdata);
-                task->computePipeline = wgpu::ComputePipeline::Acquire(returnPipeline);
-                task->isCompleted = true;
-            },
-            &task);
+                                              task.computePipeline = std::move(pipeline);
+                                              task.isCompleted = true;
+                                          });
 
         while (!task.isCompleted.load()) {
             WaitABit();
@@ -477,17 +470,14 @@ TEST_P(MultithreadTests, CreateRenderPipelineAsyncInParallel) {
             std::atomic<bool> isCompleted{false};
         } task;
         device.CreateRenderPipelineAsync(
-            &renderPipelineDescriptor,
-            [](WGPUCreatePipelineAsyncStatus status, WGPURenderPipeline returnPipeline,
-               const char* message, void* userdata) {
-                EXPECT_EQ(WGPUCreatePipelineAsyncStatus::WGPUCreatePipelineAsyncStatus_Success,
-                          status);
+            &renderPipelineDescriptor, wgpu::CallbackMode::AllowProcessEvents,
+            [&task](wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline,
+                    const char*) {
+                EXPECT_EQ(wgpu::CreatePipelineAsyncStatus::Success, status);
 
-                auto* task = static_cast<Task*>(userdata);
-                task->renderPipeline = wgpu::RenderPipeline::Acquire(returnPipeline);
-                task->isCompleted = true;
-            },
-            &task);
+                task.renderPipeline = std::move(pipeline);
+                task.isCompleted = true;
+            });
 
         while (!task.isCompleted) {
             WaitABit();
@@ -852,10 +842,6 @@ class MultithreadTextureCopyTests : public MultithreadTests {
   protected:
     void SetUp() override {
         MultithreadTests::SetUp();
-
-        // TODO(crbug.com/dawn/1291): These tests are failing on GLES (both native and ANGLE)
-        // when using Tint/GLSL.
-        DAWN_TEST_UNSUPPORTED_IF(IsOpenGLES());
     }
 
     wgpu::Texture CreateAndWriteTexture(uint32_t width,
@@ -1195,8 +1181,6 @@ TEST_P(MultithreadTextureCopyTests, CopyBufferToStencilNoRace) {
 // This test is needed since CopyTextureForBrowser() command might internally allocate resources and
 // we need to make sure that it won't race with other threads' works.
 TEST_P(MultithreadTextureCopyTests, CopyTextureForBrowserNoRace) {
-    // TODO(crbug.com/dawn/1232): Program link error on OpenGLES backend
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES());
     DAWN_SUPPRESS_TEST_IF(IsOpenGL() && IsLinux());
 
     enum class Step {
@@ -1264,8 +1248,6 @@ TEST_P(MultithreadTextureCopyTests, CopyTextureForBrowserNoRace) {
 
 // Test that error from CopyTextureForBrowser() won't cause deadlock.
 TEST_P(MultithreadTextureCopyTests, CopyTextureForBrowserErrorNoDeadLock) {
-    // TODO(crbug.com/dawn/1232): Program link error on OpenGLES backend
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES());
     DAWN_SUPPRESS_TEST_IF(IsOpenGL() && IsLinux());
 
     DAWN_TEST_UNSUPPORTED_IF(HasToggleEnabled("skip_validation"));
@@ -1482,7 +1464,7 @@ class TimestampExpectation : public detail::Expectation {
         for (size_t i = 0; i < size / sizeof(uint64_t); i++) {
             if (timestamps[i] == 0) {
                 return testing::AssertionFailure()
-                       << "Expected data[" << i << "] to be greater than 0." << std::endl;
+                       << "Expected data[" << i << "] to be greater than 0.\n";
             }
         }
 

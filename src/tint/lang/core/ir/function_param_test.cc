@@ -35,18 +35,9 @@ namespace {
 
 using namespace tint::core::number_suffixes;  // NOLINT
 using IR_FunctionParamTest = IRTestHelper;
+using IR_FunctionParamDeathTest = IR_FunctionParamTest;
 
-TEST_F(IR_FunctionParamTest, Fail_NullType) {
-    EXPECT_DEATH_IF_SUPPORTED(
-        {
-            Module mod;
-            Builder b{mod};
-            b.FunctionParam(nullptr);
-        },
-        "");
-}
-
-TEST_F(IR_FunctionParamTest, Fail_SetDuplicateBuiltin) {
+TEST_F(IR_FunctionParamDeathTest, Fail_SetDuplicateBuiltin) {
     EXPECT_DEATH_IF_SUPPORTED(
         {
             Module mod;
@@ -55,7 +46,7 @@ TEST_F(IR_FunctionParamTest, Fail_SetDuplicateBuiltin) {
             fp->SetBuiltin(BuiltinValue::kVertexIndex);
             fp->SetBuiltin(BuiltinValue::kSampleMask);
         },
-        "");
+        "internal compiler error");
 }
 
 TEST_F(IR_FunctionParamTest, CloneEmpty) {

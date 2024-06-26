@@ -60,8 +60,9 @@ class AdapterBase : public RefCounted, public WeakRefSupport<AdapterBase> {
 
     // WebGPU API
     InstanceBase* APIGetInstance() const;
-    bool APIGetLimits(SupportedLimits* limits) const;
-    void APIGetProperties(AdapterProperties* properties) const;
+    wgpu::Status APIGetLimits(SupportedLimits* limits) const;
+    wgpu::Status APIGetInfo(AdapterInfo* info) const;
+    wgpu::Status APIGetProperties(AdapterProperties* properties) const;
     bool APIHasFeature(wgpu::FeatureName feature) const;
     size_t APIEnumerateFeatures(wgpu::FeatureName* features) const;
     void APIRequestDevice(const DeviceDescriptor* descriptor,
@@ -69,8 +70,11 @@ class AdapterBase : public RefCounted, public WeakRefSupport<AdapterBase> {
                           void* userdata);
     Future APIRequestDeviceF(const DeviceDescriptor* descriptor,
                              const RequestDeviceCallbackInfo& callbackInfo);
+    Future APIRequestDevice2(const DeviceDescriptor* descriptor,
+                             const WGPURequestDeviceCallbackInfo2& callbackInfo);
     DeviceBase* APICreateDevice(const DeviceDescriptor* descriptor = nullptr);
-    bool APIGetFormatCapabilities(wgpu::TextureFormat format, FormatCapabilities* capabilities);
+    wgpu::Status APIGetFormatCapabilities(wgpu::TextureFormat format,
+                                          FormatCapabilities* capabilities);
 
     void SetUseTieredLimits(bool useTieredLimits);
 

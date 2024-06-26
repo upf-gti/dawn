@@ -145,6 +145,7 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::R8UnormStorage);
     EnableFeature(Feature::SharedBufferMemoryD3D12Resource);
     EnableFeature(Feature::ShaderModuleCompilationOptions);
+    EnableFeature(Feature::StaticSamplers);
 
     if (AreTimestampQueriesSupported()) {
         EnableFeature(Feature::TimestampQuery);
@@ -767,6 +768,10 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
                                                   kAffectedMaximumDriverVersion) <= 0) {
             deviceToggles->Default(Toggle::DisableResourceSuballocation, true);
         }
+    }
+
+    if (gpu_info::IsNvidia(vendorId)) {
+        deviceToggles->Default(Toggle::D3D12ForceStencilComponentReplicateSwizzle, true);
     }
 }
 

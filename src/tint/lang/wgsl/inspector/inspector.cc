@@ -42,6 +42,7 @@
 #include "src/tint/lang/core/type/f16.h"
 #include "src/tint/lang/core/type/f32.h"
 #include "src/tint/lang/core/type/i32.h"
+#include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/matrix.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/sampled_texture.h"
@@ -49,11 +50,13 @@
 #include "src/tint/lang/core/type/u32.h"
 #include "src/tint/lang/core/type/vector.h"
 #include "src/tint/lang/core/type/void.h"
+#include "src/tint/lang/wgsl/ast/blend_src_attribute.h"
 #include "src/tint/lang/wgsl/ast/bool_literal_expression.h"
 #include "src/tint/lang/wgsl/ast/call_expression.h"
 #include "src/tint/lang/wgsl/ast/float_literal_expression.h"
 #include "src/tint/lang/wgsl/ast/id_attribute.h"
 #include "src/tint/lang/wgsl/ast/identifier.h"
+#include "src/tint/lang/wgsl/ast/input_attachment_index_attribute.h"
 #include "src/tint/lang/wgsl/ast/int_literal_expression.h"
 #include "src/tint/lang/wgsl/ast/interpolate_attribute.h"
 #include "src/tint/lang/wgsl/ast/location_attribute.h"
@@ -338,6 +341,7 @@ std::vector<ResourceBinding> Inspector::GetResourceBindings(const std::string& e
              &Inspector::GetDepthTextureResourceBindings,
              &Inspector::GetDepthMultisampledTextureResourceBindings,
              &Inspector::GetExternalTextureResourceBindings,
+             &Inspector::GetInputAttachmentResourceBindings,
          }) {
         AppendResourceBindings(&result, (this->*fn)(entry_point));
     }
@@ -503,6 +507,45 @@ std::vector<ResourceBinding> Inspector::GetExternalTextureResourceBindings(
                                       ResourceBinding::ResourceType::kExternalTexture);
 }
 
+std::vector<ResourceBinding> Inspector::GetInputAttachmentResourceBindings(
+    const std::string& entry_point) {
+    auto* func = FindEntryPointByName(entry_point);
+    if (!func) {
+        return {};
+    }
+
+    std::vector<ResourceBinding> result;
+    auto* func_sem = program_.Sem().Get(func);
+    for (auto& ref : func_sem->TransitivelyReferencedVariablesOfType(
+             &tint::TypeInfo::Of<core::type::InputAttachment>())) {
+        auto* var = ref.first;
+        auto binding_info = ref.second;
+
+        ResourceBinding entry;
+        entry.resource_type = ResourceBinding::ResourceType::kInputAttachment;
+        entry.bind_group = binding_info.group;
+        entry.binding = binding_info.binding;
+
+        auto* sem_var = var->As<sem::GlobalVariable>();
+        TINT_ASSERT(sem_var);
+        TINT_ASSERT(sem_var->Attributes().input_attachment_index);
+        entry.input_attachmnt_index = sem_var->Attributes().input_attachment_index.value();
+
+        auto* input_attachment_type = var->Type()->UnwrapRef()->As<core::type::InputAttachment>();
+        auto* base_type = input_attachment_type->type();
+        entry.sampled_kind = BaseTypeToSampledKind(base_type);
+
+        entry.variable_name = var->Declaration()->name->symbol.Name();
+
+        entry.dim =
+            TypeTextureDimensionToResourceBindingTextureDimension(input_attachment_type->dim());
+
+        result.push_back(entry);
+    }
+
+    return result;
+}
+
 VectorRef<SamplerTexturePair> Inspector::GetSamplerTextureUses(const std::string& entry_point) {
     auto* func = FindEntryPointByName(entry_point);
     if (!func) {
@@ -612,6 +655,12 @@ void Inspector::AddEntryPointInOutVariables(std::string name,
     stage_variable.variable_name = variable_name;
     std::tie(stage_variable.component_type, stage_variable.composition_type) =
         CalculateComponentAndComposition(type);
+
+    if (auto* blend_src_attribute = ast::GetAttribute<ast::BlendSrcAttribute>(attributes)) {
+        TINT_ASSERT(blend_src_attribute->expr->Is<ast::IntLiteralExpression>());
+        stage_variable.attributes.blend_src = static_cast<uint32_t>(
+            blend_src_attribute->expr->As<ast::IntLiteralExpression>()->value);
+    }
 
     stage_variable.attributes.location = location;
     stage_variable.attributes.color = color;

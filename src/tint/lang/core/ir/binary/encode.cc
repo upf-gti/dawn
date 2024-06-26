@@ -74,6 +74,7 @@
 #include "src/tint/lang/core/type/f16.h"
 #include "src/tint/lang/core/type/f32.h"
 #include "src/tint/lang/core/type/i32.h"
+#include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/matrix.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/pointer.h"
@@ -86,7 +87,7 @@
 #include "src/tint/utils/rtti/switch.h"
 
 TINT_BEGIN_DISABLE_PROTOBUF_WARNINGS();
-#include "src/tint/lang/core/ir/binary/ir.pb.h"
+#include "src/tint/utils/protos/ir/ir.pb.h"
 TINT_END_DISABLE_PROTOBUF_WARNINGS();
 
 namespace tint::core::ir::binary {
@@ -110,7 +111,7 @@ struct Encoder {
         }
         Vector<pb::Function*, 8> fns_out;
         for (auto& fn_in : mod_in_.functions) {
-            uint32_t id = static_cast<uint32_t>(fns_out.Length() + 1);
+            uint32_t id = static_cast<uint32_t>(mod_out_.functions().size());
             fns_out.Push(mod_out_.add_functions());
             functions_.Add(fn_in, id);
         }
@@ -153,7 +154,7 @@ struct Encoder {
         fn_out->set_block(Block(fn_in->Block()));
     }
 
-    uint32_t Function(const ir::Function* fn_in) { return fn_in ? *functions_.Get(fn_in) : 0; }
+    uint32_t Function(const ir::Function* fn_in) { return *functions_.Get(fn_in); }
 
     pb::PipelineStage PipelineStage(Function::PipelineStage stage) {
         switch (stage) {
@@ -173,12 +174,11 @@ struct Encoder {
     // Blocks
     ////////////////////////////////////////////////////////////////////////////
     uint32_t Block(const ir::Block* block_in) {
-        if (block_in == nullptr) {
-            return 0;
-        }
+        TINT_ASSERT(block_in != nullptr);
+
         return blocks_.GetOrAdd(block_in, [&]() -> uint32_t {
+            auto id = static_cast<uint32_t>(mod_out_.blocks().size());
             auto& block_out = *mod_out_.add_blocks();
-            auto id = static_cast<uint32_t>(blocks_.Count());
             for (auto* inst : *block_in) {
                 Instruction(*block_out.add_instructions(), inst);
             }
@@ -296,7 +296,7 @@ struct Encoder {
 
     void InstructionLoop(pb::InstructionLoop& loop_out, const ir::Loop* loop_in) {
         if (loop_in->HasInitializer()) {
-            loop_out.set_initalizer(Block(loop_in->Initializer()));
+            loop_out.set_initializer(Block(loop_in->Initializer()));
         }
         loop_out.set_body(Block(loop_in->Body()));
         if (loop_in->HasContinuing()) {
@@ -344,6 +344,9 @@ struct Encoder {
             auto& bp_out = *var_out.mutable_binding_point();
             BindingPoint(bp_out, *bp_in);
         }
+        if (auto iidx_in = var_in->InputAttachmentIndex()) {
+            var_out.set_input_attachment_index(iidx_in.value());
+        }
     }
 
     void InstructionUnreachable(pb::InstructionUnreachable&, const ir::Unreachable*) {}
@@ -352,9 +355,7 @@ struct Encoder {
     // Types
     ////////////////////////////////////////////////////////////////////////////
     uint32_t Type(const core::type::Type* type_in) {
-        if (type_in == nullptr) {
-            return 0;
-        }
+        TINT_ASSERT(type_in != nullptr);
         return types_.GetOrAdd(type_in, [&]() -> uint32_t {
             pb::Type type_out;
             tint::Switch(
@@ -390,10 +391,13 @@ struct Encoder {
                     TypeExternalTexture(*type_out.mutable_external_texture(), t);
                 },
                 [&](const core::type::Sampler* s) { TypeSampler(*type_out.mutable_sampler(), s); },
+                [&](const core::type::InputAttachment* i) {
+                    TypeInputAttachment(*type_out.mutable_input_attachment(), i);
+                },
                 TINT_ICE_ON_NO_MATCH);
 
             mod_out_.mutable_types()->Add(std::move(type_out));
-            return static_cast<uint32_t>(mod_out_.types().size());
+            return static_cast<uint32_t>(mod_out_.types().size() - 1);
         });
     }
 
@@ -490,6 +494,10 @@ struct Encoder {
     }
 
     void TypeExternalTexture(pb::TypeExternalTexture&, const core::type::ExternalTexture*) {}
+    void TypeInputAttachment(pb::TypeInputAttachment& input_attachment_out,
+                             const core::type::InputAttachment* input_attachment_in) {
+        input_attachment_out.set_sub_type(Type(input_attachment_in->type()));
+    }
 
     void TypeSampler(pb::TypeSampler& sampler_out, const core::type::Sampler* sampler_in) {
         sampler_out.set_kind(SamplerKind(sampler_in->kind()));
@@ -564,9 +572,7 @@ struct Encoder {
     // ConstantValues
     ////////////////////////////////////////////////////////////////////////////
     uint32_t ConstantValue(const core::constant::Value* constant_in) {
-        if (!constant_in) {
-            return 0;
-        }
+        TINT_ASSERT(constant_in != nullptr);
         return constant_values_.GetOrAdd(constant_in, [&] {
             pb::ConstantValue constant_out;
             tint::Switch(
@@ -595,7 +601,7 @@ struct Encoder {
                 TINT_ICE_ON_NO_MATCH);
 
             mod_out_.mutable_constant_values()->Add(std::move(constant_out));
-            return static_cast<uint32_t>(mod_out_.constant_values().size());
+            return static_cast<uint32_t>(mod_out_.constant_values().size() - 1);
         });
     }
 
@@ -1128,6 +1134,8 @@ struct Encoder {
                 return pb::BuiltinFn::subgroup_ballot;
             case core::BuiltinFn::kSubgroupBroadcast:
                 return pb::BuiltinFn::subgroup_broadcast;
+            case core::BuiltinFn::kInputAttachmentLoad:
+                return pb::BuiltinFn::input_attachment_load;
             case core::BuiltinFn::kNone:
                 break;
         }

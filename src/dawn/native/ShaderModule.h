@@ -130,10 +130,12 @@ struct ShaderModuleEntryPoint {
     std::string name;
 };
 
-MaybeError ValidateAndParseShaderModule(DeviceBase* device,
-                                        const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
-                                        ShaderModuleParseResult* parseResult,
-                                        OwnedCompilationMessages* outMessages);
+MaybeError ValidateAndParseShaderModule(
+    DeviceBase* device,
+    const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+    const std::vector<tint::wgsl::Extension>& internalExtensions,
+    ShaderModuleParseResult* parseResult,
+    OwnedCompilationMessages* outMessages);
 MaybeError ValidateCompatibilityWithPipelineLayout(DeviceBase* device,
                                                    const EntryPointMetadata& entryPoint,
                                                    const PipelineLayoutBase* layout);
@@ -166,11 +168,12 @@ struct ShaderBindingInfo {
                  SamplerBindingInfo,
                  TextureBindingInfo,
                  StorageTextureBindingInfo,
-                 ExternalTextureBindingInfo>
+                 ExternalTextureBindingInfo,
+                 InputAttachmentBindingInfo>
         bindingInfo;
 };
 
-using BindingGroupInfoMap = std::map<BindingNumber, ShaderBindingInfo>;
+using BindingGroupInfoMap = absl::flat_hash_map<BindingNumber, ShaderBindingInfo>;
 using BindingInfoArray = ityp::array<BindGroupIndex, BindingGroupInfoMap, kMaxBindGroups>;
 
 // The WebGPU override variables only support these scalar types
@@ -211,6 +214,7 @@ struct EntryPointMetadata {
     struct FragmentRenderAttachmentInfo {
         TextureComponentType baseType;
         uint8_t componentCount;
+        uint8_t blendSrc;
     };
     PerColorAttachment<FragmentRenderAttachmentInfo> fragmentOutputVariables;
     ColorAttachmentMask fragmentOutputMask;
@@ -271,7 +275,6 @@ struct EntryPointMetadata {
     bool usesInstanceIndex = false;
     bool usesNumWorkgroups = false;
     bool usesSampleMaskOutput = false;
-    bool usesSampleIndex = false;
     bool usesVertexIndex = false;
 };
 
@@ -282,8 +285,11 @@ class ShaderModuleBase : public RefCountedWithExternalCountBase<ApiObjectBase>,
     using Base = RefCountedWithExternalCountBase<ApiObjectBase>;
     ShaderModuleBase(DeviceBase* device,
                      const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+                     std::vector<tint::wgsl::Extension> internalExtensions,
                      ApiObjectBase::UntrackedByDeviceTag tag);
-    ShaderModuleBase(DeviceBase* device, const UnpackedPtr<ShaderModuleDescriptor>& descriptor);
+    ShaderModuleBase(DeviceBase* device,
+                     const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+                     std::vector<tint::wgsl::Extension> internalExtensions);
     ~ShaderModuleBase() override;
 
     static Ref<ShaderModuleBase> MakeError(DeviceBase* device, const char* label);
@@ -322,6 +328,7 @@ class ShaderModuleBase : public RefCountedWithExternalCountBase<ApiObjectBase>,
 
     void APIGetCompilationInfo(wgpu::CompilationInfoCallback callback, void* userdata);
     Future APIGetCompilationInfoF(const CompilationInfoCallbackInfo& callbackInfo);
+    Future APIGetCompilationInfo2(const WGPUCompilationInfoCallbackInfo2& callbackInfo);
 
     void InjectCompilationMessages(std::unique_ptr<OwnedCompilationMessages> compilationMessages);
     OwnedCompilationMessages* GetCompilationMessages() const;
@@ -358,6 +365,8 @@ class ShaderModuleBase : public RefCountedWithExternalCountBase<ApiObjectBase>,
     MutexProtected<TintData> mTintData;
 
     std::unique_ptr<OwnedCompilationMessages> mCompilationMessages;
+
+    const std::vector<tint::wgsl::Extension> mInternalExtensions;
 };
 
 }  // namespace dawn::native

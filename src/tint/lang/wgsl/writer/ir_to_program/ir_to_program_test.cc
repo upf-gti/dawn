@@ -32,12 +32,11 @@
 
 #include "src/tint/lang/core/access.h"
 #include "src/tint/lang/core/address_space.h"
-#include "src/tint/lang/core/ir/disassembly.h"
+#include "src/tint/lang/core/ir/disassembler.h"
 #include "src/tint/lang/core/texel_format.h"
 #include "src/tint/lang/core/type/storage_texture.h"
 #include "src/tint/lang/core/type/texture_dimension.h"
 #include "src/tint/lang/wgsl/ir/builtin_call.h"
-#include "src/tint/lang/wgsl/ir/unary.h"
 #include "src/tint/lang/wgsl/writer/ir_to_program/ir_to_program.h"
 #include "src/tint/lang/wgsl/writer/ir_to_program/ir_to_program_test.h"
 #include "src/tint/lang/wgsl/writer/writer.h"
@@ -51,7 +50,7 @@ using namespace tint::core::fluent_types;     // NOLINT
 IRToProgramTest::Result IRToProgramTest::Run() {
     Result result;
 
-    result.ir = tint::core::ir::Disassemble(mod).Plain();
+    result.ir = tint::core::ir::Disassembler(mod).Plain();
 
     ProgramOptions options;
     options.allowed_features = AllowedFeatures::Everything();
@@ -129,7 +128,7 @@ TEST_F(IRToProgramTest, EntryPoint_Compute) {
     fn->Block()->Append(b.Return(fn));
 
     EXPECT_WGSL(R"(
-@compute @workgroup_size(3, 4, 5)
+@compute @workgroup_size(3u, 4u, 5u)
 fn f() {
 }
 )");
@@ -151,7 +150,7 @@ TEST_F(IRToProgramTest, EntryPoint_Vertex) {
     auto* fn = b.Function("f", ty.vec4<f32>(), core::ir::Function::PipelineStage::kVertex);
     fn->SetReturnBuiltin(core::BuiltinValue::kPosition);
 
-    fn->Block()->Append(b.Return(fn, b.Splat(ty.vec4<f32>(), 0_f, 4)));
+    fn->Block()->Append(b.Return(fn, b.Splat<vec4<f32>>(0_f)));
 
     EXPECT_WGSL(R"(
 @vertex
@@ -194,7 +193,7 @@ TEST_F(IRToProgramTest, EntryPoint_ReturnAttribute_Invariant) {
     fn->SetReturnBuiltin(core::BuiltinValue::kPosition);
     fn->SetReturnInvariant(true);
 
-    fn->Block()->Append(b.Return(fn, b.Splat(ty.vec4<f32>(), 0_f, 4)));
+    fn->Block()->Append(b.Return(fn, b.Splat<vec4<f32>>(0_f)));
 
     EXPECT_WGSL(R"(
 @vertex
@@ -208,11 +207,11 @@ TEST_F(IRToProgramTest, EntryPoint_ReturnAttribute_Location) {
     auto* fn = b.Function("f", ty.vec4<f32>(), core::ir::Function::PipelineStage::kFragment);
     fn->SetReturnLocation(1, std::nullopt);
 
-    fn->Block()->Append(b.Return(fn, b.Splat(ty.vec4<f32>(), 0_f, 4)));
+    fn->Block()->Append(b.Return(fn, b.Splat<vec4<f32>>(0_f)));
 
     EXPECT_WGSL(R"(
 @fragment
-fn f() -> @location(1) vec4<f32> {
+fn f() -> @location(1u) vec4<f32> {
   return vec4<f32>();
 }
 )");
@@ -246,7 +245,7 @@ TEST_F(IRToProgramTest, EntryPoint_ParameterAttribute_Compute) {
     EXPECT_WGSL(R"(
 enable chromium_experimental_subgroups;
 
-@compute @workgroup_size(3, 4, 5)
+@compute @workgroup_size(3u, 4u, 5u)
 fn f(@builtin(local_invocation_id) v : vec3<u32>, @builtin(local_invocation_index) v_1 : u32, @builtin(global_invocation_id) v_2 : vec3<u32>, @builtin(workgroup_id) v_3 : vec3<u32>, @builtin(num_workgroups) v_4 : vec3<u32>, @builtin(subgroup_invocation_id) v_5 : u32, @builtin(subgroup_size) v_6 : u32) {
 }
 )");
@@ -2226,7 +2225,7 @@ TEST_F(IRToProgramTest, For_IncInInit_Cmp) {
     });
 
     EXPECT_WGSL(R"(
-@group(0) @binding(0) var<storage, read_write> v : u32;
+@group(0u) @binding(0u) var<storage, read_write> v : u32;
 
 fn f() {
   for(v = (v + 1u); (v < 10u); ) {
@@ -2647,7 +2646,7 @@ TEST_F(IRToProgramTest, Enable_ChromiumInternalGraphite_SubgroupBallot) {
     EXPECT_WGSL(R"(
 enable chromium_internal_graphite;
 
-@group(0) @binding(0) var T : texture_storage_2d<r8unorm, read>;
+@group(0u) @binding(0u) var T : texture_storage_2d<r8unorm, read>;
 )");
 }
 

@@ -374,6 +374,7 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::SurfaceCapabilities);
     EnableFeature(Feature::TransientAttachments);
     EnableFeature(Feature::AdapterPropertiesVk);
+    EnableFeature(Feature::DawnLoadResolveTexture);
 
     // Enable ChromiumExperimentalSubgroups feature if:
     // 1. Vulkan API version is 1.1 or later, and
@@ -637,13 +638,14 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     // Vulkan SPEC and drivers.
     deviceToggles->Default(Toggle::UseTemporaryBufferInCompressedTextureToTextureCopy, true);
 
-#if DAWN_PLATFORM_IS(ANDROID)
-    // Default to the IR backend on Android.
-    deviceToggles->Default(Toggle::UseTintIR, true);
-#else
-    // All other platforms default to the value corresponding to the feature flag.
+    // TODO(crbug.com/345276504): Remove this and associated ShaderModuleVK code after M128 branch.
+#if DAWN_PLATFORM_IS(CHROMEOS)
+    // ChromeOS is controlled by the feature flag (which defaults to `true`) for one more release.
     deviceToggles->Default(Toggle::UseTintIR,
                            platform->IsFeatureEnabled(platform::Features::kWebGPUUseTintIR));
+#else
+    // All other Vulkan platforms are not controlled by the feature flag and use the IR by default.
+    deviceToggles->Default(Toggle::UseTintIR, true);
 #endif
 
     if (IsAndroidQualcomm()) {
@@ -665,6 +667,10 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
         // forced to store the multisampled targets and do the resolves as separate passes injected
         // after the original one.
         deviceToggles->Default(Toggle::ResolveMultipleAttachmentInSeparatePasses, true);
+    }
+
+    if (IsAndroidSamsung() || IsAndroidQualcomm()) {
+        deviceToggles->Default(Toggle::IgnoreImportedAHardwareBufferVulkanImageSize, true);
     }
 
     if (IsIntelMesa() && gpu_info::IsIntelGen12LP(GetVendorId(), GetDeviceId())) {
@@ -810,6 +816,14 @@ bool PhysicalDevice::IsAndroidARM() const {
 #endif
 }
 
+bool PhysicalDevice::IsAndroidSamsung() const {
+#if DAWN_PLATFORM_IS(ANDROID)
+    return gpu_info::IsSamsung(GetVendorId());
+#else
+    return false;
+#endif
+}
+
 bool PhysicalDevice::IsIntelMesa() const {
     if (mDeviceInfo.HasExt(DeviceExt::DriverProperties)) {
         return mDeviceInfo.driverProperties.driverID == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA_KHR;
@@ -890,6 +904,24 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
 
     PhysicalDeviceSurfaceCapabilities capabilities;
 
+    // Convert the known swapchain usages.
+    capabilities.usages = wgpu::TextureUsage::None;
+    if (vkCaps.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        capabilities.usages |= wgpu::TextureUsage::CopySrc;
+    }
+    if (vkCaps.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+        capabilities.usages |= wgpu::TextureUsage::CopyDst;
+    }
+    if (vkCaps.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+        capabilities.usages |= wgpu::TextureUsage::RenderAttachment;
+    }
+    if (vkCaps.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
+        capabilities.usages |= wgpu::TextureUsage::TextureBinding;
+    }
+    if (vkCaps.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
+        capabilities.usages |= wgpu::TextureUsage::StorageBinding;
+    }
+
     // Convert known swapchain formats
     auto ToWGPUSwapChainFormat = [](VkFormat format) -> wgpu::TextureFormat {
         switch (format) {
@@ -950,7 +982,6 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
         {VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, wgpu::CompositeAlphaMode::Inherit},
     };
 
-    capabilities.alphaModes.push_back(wgpu::CompositeAlphaMode::Auto);
     for (auto mode : alphaModePairs) {
         if (vkCaps.capabilities.supportedCompositeAlpha & mode.vkBit) {
             capabilities.alphaModes.push_back(mode.webgpuEnum);

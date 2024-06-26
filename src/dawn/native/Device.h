@@ -96,17 +96,14 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
         wgpu::DeviceLostReason mReason;
         std::string mMessage;
 
-        wgpu::DeviceLostCallbackNew mCallback = nullptr;
-        // TODO(https://crbug.com/dawn/2465): Remove old callback when setters are deprecated, and
-        // move userdata into private.
-        wgpu::DeviceLostCallback mOldCallback = nullptr;
-        raw_ptr<void> mUserdata;
+        WGPUDeviceLostCallback2 mCallback = nullptr;
+        raw_ptr<void> mUserdata1;
+        raw_ptr<void> mUserdata2;
         // Note that the device is set when the event is passed to construct a device.
         Ref<DeviceBase> mDevice = nullptr;
 
       private:
-        explicit DeviceLostEvent(const DeviceLostCallbackInfo& callbackInfo);
-        DeviceLostEvent(wgpu::DeviceLostCallback oldCallback, void* userdata);
+        explicit DeviceLostEvent(const WGPUDeviceLostCallbackInfo2& callbackInfo);
         ~DeviceLostEvent() override;
 
         void Complete(EventCompletionType completionType) override;
@@ -185,6 +182,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
 
     ResultOrError<Ref<ShaderModuleBase>> GetOrCreateShaderModule(
         const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+        const std::vector<tint::wgsl::Extension>& internalExtensions,
         ShaderModuleParseResult* parseResult,
         std::unique_ptr<OwnedCompilationMessages>* compilationMessages);
 
@@ -220,12 +218,15 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     ResultOrError<Ref<RenderBundleEncoder>> CreateRenderBundleEncoder(
         const RenderBundleEncoderDescriptor* descriptor);
     ResultOrError<Ref<RenderPipelineBase>> CreateRenderPipeline(
-        const RenderPipelineDescriptor* descriptor);
+        const RenderPipelineDescriptor* descriptor,
+        bool allowInternalBinding = false);
     ResultOrError<Ref<RenderPipelineBase>> CreateUninitializedRenderPipeline(
-        const RenderPipelineDescriptor* descriptor);
+        const RenderPipelineDescriptor* descriptor,
+        bool allowInternalBinding = false);
     ResultOrError<Ref<SamplerBase>> CreateSampler(const SamplerDescriptor* descriptor = nullptr);
     ResultOrError<Ref<ShaderModuleBase>> CreateShaderModule(
         const ShaderModuleDescriptor* descriptor,
+        const std::vector<tint::wgsl::Extension>& internalExtensions = {},
         std::unique_ptr<OwnedCompilationMessages>* compilationMessages = nullptr);
     // Deprecated: this was the way to create a SwapChain when it was explicitly manipulated by the
     // end user.
@@ -254,11 +255,17 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     Future APICreateComputePipelineAsyncF(
         const ComputePipelineDescriptor* descriptor,
         const CreateComputePipelineAsyncCallbackInfo& callbackInfo);
+    Future APICreateComputePipelineAsync2(
+        const ComputePipelineDescriptor* descriptor,
+        const WGPUCreateComputePipelineAsyncCallbackInfo2& callbackInfo);
     void APICreateRenderPipelineAsync(const RenderPipelineDescriptor* descriptor,
                                       WGPUCreateRenderPipelineAsyncCallback callback,
                                       void* userdata);
     Future APICreateRenderPipelineAsyncF(const RenderPipelineDescriptor* descriptor,
                                          const CreateRenderPipelineAsyncCallbackInfo& callbackInfo);
+    Future APICreateRenderPipelineAsync2(
+        const RenderPipelineDescriptor* descriptor,
+        const WGPUCreateRenderPipelineAsyncCallbackInfo2& callbackInfo);
     RenderBundleEncoder* APICreateRenderBundleEncoder(
         const RenderBundleEncoderDescriptor* descriptor);
     RenderPipelineBase* APICreateRenderPipeline(const RenderPipelineDescriptor* descriptor);
@@ -288,7 +295,9 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     AdapterBase* APIGetAdapter();
     QueueBase* APIGetQueue();
 
-    bool APIGetLimits(SupportedLimits* limits) const;
+    wgpu::Status APIGetAHardwareBufferProperties(void* handle,
+                                                 AHardwareBufferProperties* properties);
+    wgpu::Status APIGetLimits(SupportedLimits* limits) const;
     bool APIHasFeature(wgpu::FeatureName feature) const;
     size_t APIEnumerateFeatures(wgpu::FeatureName* features) const;
     void APIInjectError(wgpu::ErrorType type, const char* message);
@@ -390,9 +399,9 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     // See https://crbug.com/dawn/161
     virtual bool ShouldApplyIndexBufferOffsetToFirstIndex() const;
 
-    // Whether the backend supports blitting the resolve texture with draw calls in the same render
-    // pass that it will be resolved into.
-    virtual bool IsResolveTextureBlitWithDrawSupported() const;
+    // Whether the backend can use textureLoad() on a resolve target in the same render pass that it
+    // will be resolved into.
+    virtual bool CanTextureLoadResolveTargetInTheSameRenderpass() const;
 
     bool HasFeature(Feature feature) const;
 
@@ -401,21 +410,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     AsyncTaskManager* GetAsyncTaskManager() const;
     CallbackTaskManager* GetCallbackTaskManager() const;
     dawn::platform::WorkerTaskPool* GetWorkerTaskPool() const;
-
-    // Enqueue a successfully-create async pipeline creation callback.
-    // TODO(dawn:2353): Remove.
-    void AddRenderPipelineAsyncCallbackTask(Ref<RenderPipelineBase> pipeline,
-                                            WGPUCreateRenderPipelineAsyncCallback callback,
-                                            void* userdata);
-    // Enqueue a failed async pipeline creation callback.
-    // If the device is lost, then further errors should not be reported to
-    // the application. Instead of an error, a successful callback is enqueued, using
-    // an error pipeline created with `label`.
-    // TODO(dawn:2353): Remove.
-    void AddRenderPipelineAsyncCallbackTask(std::unique_ptr<ErrorData> error,
-                                            const char* label,
-                                            WGPUCreateRenderPipelineAsyncCallback callback,
-                                            void* userdata);
 
     PipelineCompatibilityToken GetNextPipelineCompatibilityToken();
 
@@ -446,6 +440,8 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
 
     void DumpMemoryStatistics(dawn::native::MemoryDump* dump) const;
 
+    ResultOrError<Ref<BufferBase>> GetOrCreateTemporaryUniformBuffer(size_t size);
+
   protected:
     // Constructor used only for mocking and testing.
     DeviceBase();
@@ -456,6 +452,12 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     MaybeError Initialize(Ref<QueueBase> defaultQueue);
     void DestroyObjects();
     void Destroy();
+
+    virtual MaybeError GetAHardwareBufferPropertiesImpl(
+        void* handle,
+        AHardwareBufferProperties* properties) const {
+        DAWN_UNREACHABLE();
+    }
 
     // Device lost event needs to be protected for now because mock device needs it.
     // TODO(dawn:1702) Make this private and move the class in the implementation file when we mock
@@ -481,6 +483,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
         const SamplerDescriptor* descriptor) = 0;
     virtual ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
         const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+        const std::vector<tint::wgsl::Extension>& internalExtensions,
         ShaderModuleParseResult* parseResult,
         OwnedCompilationMessages* compilationMessages) = 0;
     // Note that previousSwapChain may be nullptr, or come from a different backend.
@@ -504,9 +507,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     virtual ResultOrError<Ref<SharedFenceBase>> ImportSharedFenceImpl(
         const SharedFenceDescriptor* descriptor);
     virtual void SetLabelImpl();
-
-    virtual ResultOrError<wgpu::TextureUsage> GetSupportedSurfaceUsageImpl(
-        const Surface* surface) const = 0;
 
     virtual MaybeError TickImpl() = 0;
     void FlushCallbackTaskQueue();
@@ -547,7 +547,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
                                                     const TextureCopy& dst,
                                                     const Extent3D& copySizePixels) = 0;
 
-    UncapturedErrorCallbackInfo mUncapturedErrorCallbackInfo;
+    WGPUUncapturedErrorCallbackInfo2 mUncapturedErrorCallbackInfo;
 
     std::shared_mutex mLoggingMutex;
     wgpu::LoggingCallback mLoggingCallback = nullptr;
@@ -590,6 +590,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     tint::wgsl::AllowedFeatures mWGSLAllowedFeatures;
 
     std::unique_ptr<InternalPipelineStore> mInternalPipelineStore;
+    Ref<BufferBase> mTemporaryUniformBuffer;
 
     Ref<CallbackTaskManager> mCallbackTaskManager;
     std::unique_ptr<dawn::platform::WorkerTaskPool> mWorkerTaskPool;
@@ -616,7 +617,8 @@ ResultOrError<Ref<PipelineLayoutBase>> ValidateLayoutAndGetComputePipelineDescri
 ResultOrError<Ref<PipelineLayoutBase>> ValidateLayoutAndGetRenderPipelineDescriptorWithDefaults(
     DeviceBase* device,
     const RenderPipelineDescriptor& descriptor,
-    RenderPipelineDescriptor* outDescriptor);
+    RenderPipelineDescriptor* outDescriptor,
+    bool allowInternalBinding = false);
 
 class IgnoreLazyClearCountScope : public NonMovable, public StackAllocated {
   public:

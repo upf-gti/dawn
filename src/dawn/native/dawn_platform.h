@@ -93,6 +93,14 @@ static constexpr wgpu::BufferBindingType kInternalStorageBufferBinding =
 // Extra TextureSampleType for sampling from a resolve attachment.
 static constexpr wgpu::TextureSampleType kInternalResolveAttachmentSampleType =
     static_cast<wgpu::TextureSampleType>(~0u);
+
+// Extra TextureViewDimension for input attachment.
+static constexpr wgpu::TextureViewDimension kInternalInputAttachmentDim =
+    static_cast<wgpu::TextureViewDimension>(~0u);
+
+static constexpr uint32_t kEnumPrefixMask = 0xFFFF'0000;
+static constexpr uint32_t kDawnEnumPrefix = 0x0005'0000;
+
 }  // namespace dawn::native
 
 #endif  // SRC_DAWN_NATIVE_DAWN_PLATFORM_H_

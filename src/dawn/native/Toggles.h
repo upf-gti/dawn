@@ -95,6 +95,7 @@ enum class Toggle {
     D3D12UseTempBufferInTextureToTextureCopyBetweenDifferentDimensions,
     ApplyClearBigIntegerColorValueWithDraw,
     MetalUseMockBlitEncoderForWriteTimestamp,
+    MetalDisableTimestampPeriodEstimation,
     VulkanSplitCommandBufferOnComputePassAfterRenderPass,
     DisableSubAllocationFor2DTextureWithCopyDstOrRenderAttachment,
     MetalUseCombinedDepthStencilFormatForStencil8,
@@ -132,6 +133,8 @@ enum class Toggle {
     EnableImmediateErrorHandling,
     VulkanUseStorageInputOutput16,
     D3D12DontUseShaderModel66OrHigher,
+    UsePackedDepth24UnormStencil8Format,
+    D3D12ForceStencilComponentReplicateSwizzle,
 
     // Unresolved issues.
     NoWorkaroundSampleMaskBecomesZeroForAllButLastColorTarget,
@@ -142,6 +145,7 @@ enum class Toggle {
     VulkanSkipDraw,
 
     D3D11UseUnmonitoredFence,
+    IgnoreImportedAHardwareBufferVulkanImageSize,
 
     EnumCount,
     InvalidEnum = EnumCount,

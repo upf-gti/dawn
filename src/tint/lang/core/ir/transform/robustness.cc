@@ -99,8 +99,7 @@ struct State {
                     // Check if this is a texture builtin that needs to be clamped.
                     if (config.clamp_texture) {
                         if (call->Func() == core::BuiltinFn::kTextureDimensions ||
-                            call->Func() == core::BuiltinFn::kTextureLoad ||
-                            call->Func() == core::BuiltinFn::kTextureStore) {
+                            call->Func() == core::BuiltinFn::kTextureLoad) {
                             texture_calls.Push(call);
                         }
                     }
@@ -292,7 +291,7 @@ struct State {
             auto* one = b.Constant(1_u);
             if (auto* vec = args[idx]->Type()->As<type::Vector>()) {
                 type = ty.vec(type, vec->Width());
-                one = b.Splat(type, one, vec->Width());
+                one = b.Splat(type, one);
             }
             auto* dims = clamped_level ? b.Call(type, core::BuiltinFn::kTextureDimensions, args[0],
                                                 clamped_level)

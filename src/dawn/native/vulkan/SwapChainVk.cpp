@@ -68,6 +68,7 @@ VkPresentModeKHR ToVulkanPresentMode(wgpu::PresentMode mode) {
 uint32_t MinImageCountForPresentMode(VkPresentModeKHR mode) {
     switch (mode) {
         case VK_PRESENT_MODE_FIFO_KHR:
+        case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
         case VK_PRESENT_MODE_IMMEDIATE_KHR:
             return 2;
         case VK_PRESENT_MODE_MAILBOX_KHR:
@@ -79,41 +80,6 @@ uint32_t MinImageCountForPresentMode(VkPresentModeKHR mode) {
 }
 
 }  // anonymous namespace
-
-// static
-ResultOrError<wgpu::TextureUsage> SwapChain::GetSupportedSurfaceUsage(const Device* device,
-                                                                      const Surface* surface) {
-    PhysicalDevice* physicalDevice = ToBackend(device->GetPhysicalDevice());
-    const VulkanFunctions& fn = physicalDevice->GetVulkanInstance()->GetFunctions();
-    VkInstance instanceVk = physicalDevice->GetVulkanInstance()->GetVkInstance();
-    VkPhysicalDevice vkPhysicalDevice = physicalDevice->GetVkPhysicalDevice();
-
-    VkSurfaceKHR surfaceVk;
-    VkSurfaceCapabilitiesKHR surfaceCapsVk;
-    DAWN_TRY_ASSIGN(surfaceVk, CreateVulkanSurface(device->GetInstance(), physicalDevice, surface));
-
-    DAWN_TRY(CheckVkSuccess(
-        fn.GetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, surfaceVk, &surfaceCapsVk),
-        "GetPhysicalDeviceSurfaceCapabilitiesKHR"));
-
-    wgpu::TextureUsage supportedUsages = wgpu::TextureUsage::None;
-    if (surfaceCapsVk.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-        supportedUsages |= wgpu::TextureUsage::CopySrc;
-    }
-    if (surfaceCapsVk.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
-        supportedUsages |= wgpu::TextureUsage::CopyDst;
-    }
-    if (surfaceCapsVk.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
-        supportedUsages |= wgpu::TextureUsage::RenderAttachment;
-    }
-    if (surfaceCapsVk.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
-        supportedUsages |= wgpu::TextureUsage::TextureBinding;
-    }
-
-    fn.DestroySurfaceKHR(instanceVk, surfaceVk, nullptr);
-
-    return supportedUsages;
-}
 
 // static
 ResultOrError<Ref<SwapChain>> SwapChain::Create(Device* device,
@@ -264,9 +230,10 @@ ResultOrError<SwapChain::Config> SwapChain::ChooseConfig(
         };
 
         VkPresentModeKHR targetMode = ToVulkanPresentMode(GetPresentMode());
-        const std::array<VkPresentModeKHR, 3> kPresentModeFallbacks = {
+        const std::array<VkPresentModeKHR, 4> kPresentModeFallbacks = {
             VK_PRESENT_MODE_IMMEDIATE_KHR,
             VK_PRESENT_MODE_MAILBOX_KHR,
+            VK_PRESENT_MODE_FIFO_RELAXED_KHR,
             VK_PRESENT_MODE_FIFO_KHR,
         };
 
@@ -298,7 +265,7 @@ ResultOrError<SwapChain::Config> SwapChain::ChooseConfig(
 
     // Choose the target usage or do a blit.
     VkImageUsageFlags targetUsages =
-        VulkanImageUsage(GetUsage(), GetDevice()->GetValidInternalFormat(GetFormat()));
+        VulkanImageUsage(GetDevice(), GetUsage(), GetDevice()->GetValidInternalFormat(GetFormat()));
     VkImageUsageFlags supportedUsages = surfaceInfo.capabilities.supportedUsageFlags;
     if (!IsSubset(targetUsages, supportedUsages)) {
         config.needsBlit = true;

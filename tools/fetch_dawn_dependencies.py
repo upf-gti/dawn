@@ -101,14 +101,15 @@ def main(args):
         'third_party/jinja2',
         'third_party/khronos/EGL-Registry',
         'third_party/khronos/OpenGL-Registry',
+        'third_party/libprotobuf-mutator/src',
+        'third_party/protobuf',
         'third_party/markupsafe',
-        'third_party/vulkan-deps',
-        'third_party/vulkan-deps/glslang/src',
-        'third_party/vulkan-deps/spirv-headers/src',
-        'third_party/vulkan-deps/spirv-tools/src',
-        'third_party/vulkan-deps/vulkan-headers/src',
-        'third_party/vulkan-deps/vulkan-loader/src',
-        'third_party/vulkan-deps/vulkan-utility-libraries/src',
+        'third_party/glslang/src',
+        'third_party/spirv-headers/src',
+        'third_party/spirv-tools/src',
+        'third_party/vulkan-headers/src',
+        'third_party/vulkan-loader/src',
+        'third_party/vulkan-utility-libraries/src',
     ]
 
     if args.use_test_deps:
@@ -141,9 +142,9 @@ def process_dir(args, dir_path, required_submodules):
     variables = ldict.get('vars', {})
 
     if deps is None:
-        log(f"ERROR: DEPS file '{deps_path}' does not define a 'deps' variable"
+        log(f"WARNING: DEPS file '{deps_path}' does not define a 'deps' variable"
             )
-        exit(1)
+        return
 
     for submodule in required_submodules:
         if submodule not in deps:

@@ -30,13 +30,14 @@
 #include <utility>
 
 #include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 #include "src/tint/lang/core/address_space.h"
 #include "src/tint/lang/core/ir/builder.h"
 #include "src/tint/lang/core/ir/function_param.h"
 #include "src/tint/lang/core/ir/ir_helper_test.h"
 #include "src/tint/lang/core/ir/validator.h"
-#include "src/tint/lang/core/type/array.h"
+#include "src/tint/lang/core/number.h"
 #include "src/tint/lang/core/type/manager.h"
 #include "src/tint/lang/core/type/matrix.h"
 #include "src/tint/lang/core/type/memory_view.h"
@@ -239,6 +240,48 @@ note: # Disassembly
 )");
 }
 
+TEST_F(IR_ValidatorTest, Function_ParameterWithNullType) {
+    auto* f = b.Function("my_func", ty.void_());
+    auto* p = b.FunctionParam("my_param", nullptr);
+    f->SetParams({p});
+    f->Block()->Append(b.Return(f));
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:1:17 error: function parameter has nullptr type
+%my_func = func(%my_param:undef):void {
+                ^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func(%my_param:undef):void {
+  $B1: {
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Function_MissingWorkgroupSize) {
+    auto* f = b.Function("f", ty.void_(), Function::PipelineStage::kCompute);
+    b.Append(f->Block(), [&] { b.Return(f); });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:1:1 error: compute entry point requires workgroup size attribute
+%f = @compute func():void {
+^^
+
+note: # Disassembly
+%f = @compute func():void {
+  $B1: {
+    ret
+  }
+}
+)");
+}
+
 TEST_F(IR_ValidatorTest, CallToFunctionOutsideModule) {
     auto* f = b.Function("f", ty.void_());
     auto* g = b.Function("g", ty.void_());
@@ -274,6 +317,7 @@ note: # Disassembly
 TEST_F(IR_ValidatorTest, CallToEntryPointFunction) {
     auto* f = b.Function("f", ty.void_());
     auto* g = b.Function("g", ty.void_(), Function::PipelineStage::kCompute);
+    g->SetWorkgroupSize(1, 1, 1);
 
     b.Append(f->Block(), [&] {
         b.Call(g);
@@ -299,7 +343,7 @@ note: # Disassembly
     ret
   }
 }
-%g = @compute func():void {
+%g = @compute @workgroup_size(1, 1, 1) func():void {
   $B2: {
     ret
   }
@@ -419,6 +463,153 @@ note: # Disassembly
 )");
 }
 
+TEST_F(IR_ValidatorTest, Construct_Struct_ZeroValue) {
+    auto* str_ty = ty.Struct(mod.symbols.New("MyStruct"), {
+                                                              {mod.symbols.New("a"), ty.i32()},
+                                                              {mod.symbols.New("b"), ty.u32()},
+                                                          });
+
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {
+        b.Construct(str_ty);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success) << res.Failure();
+}
+
+TEST_F(IR_ValidatorTest, Construct_Struct_ValidArgs) {
+    auto* str_ty = ty.Struct(mod.symbols.New("MyStruct"), {
+                                                              {mod.symbols.New("a"), ty.i32()},
+                                                              {mod.symbols.New("b"), ty.u32()},
+                                                          });
+
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {
+        b.Construct(str_ty, 1_i, 2_u);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success) << res.Failure();
+}
+
+TEST_F(IR_ValidatorTest, Construct_Struct_NotEnoughArgs) {
+    auto* str_ty = ty.Struct(mod.symbols.New("MyStruct"), {
+                                                              {mod.symbols.New("a"), ty.i32()},
+                                                              {mod.symbols.New("b"), ty.u32()},
+                                                          });
+
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {
+        b.Construct(str_ty, 1_i);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:8:19 error: construct: structure has 2 members, but construct provides 1 arguments
+    %2:MyStruct = construct 1i
+                  ^^^^^^^^^
+
+:7:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+MyStruct = struct @align(4) {
+  a:i32 @offset(0)
+  b:u32 @offset(4)
+}
+
+%f = func():void {
+  $B1: {
+    %2:MyStruct = construct 1i
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Construct_Struct_TooManyArgs) {
+    auto* str_ty = ty.Struct(mod.symbols.New("MyStruct"), {
+                                                              {mod.symbols.New("a"), ty.i32()},
+                                                              {mod.symbols.New("b"), ty.u32()},
+                                                          });
+
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {
+        b.Construct(str_ty, 1_i, 2_u, 3_i);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:8:19 error: construct: structure has 2 members, but construct provides 3 arguments
+    %2:MyStruct = construct 1i, 2u, 3i
+                  ^^^^^^^^^
+
+:7:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+MyStruct = struct @align(4) {
+  a:i32 @offset(0)
+  b:u32 @offset(4)
+}
+
+%f = func():void {
+  $B1: {
+    %2:MyStruct = construct 1i, 2u, 3i
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Construct_Struct_WrongArgType) {
+    auto* str_ty = ty.Struct(mod.symbols.New("MyStruct"), {
+                                                              {mod.symbols.New("a"), ty.i32()},
+                                                              {mod.symbols.New("b"), ty.u32()},
+                                                          });
+
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {
+        b.Construct(str_ty, 1_i, 2_i);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(
+        res.Failure().reason.Str(),
+        R"(:8:33 error: construct: structure member 1 is of type 'u32', but argument is of type 'i32'
+    %2:MyStruct = construct 1i, 2i
+                                ^^
+
+:7:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+MyStruct = struct @align(4) {
+  a:i32 @offset(0)
+  b:u32 @offset(4)
+}
+
+%f = func():void {
+  $B1: {
+    %2:MyStruct = construct 1i, 2i
+    ret
+  }
+}
+)");
+}
+
 TEST_F(IR_ValidatorTest, Block_NoTerminator) {
     b.Function("my_func", ty.void_());
 
@@ -485,6 +676,7 @@ TEST_F(IR_ValidatorTest, Block_DeadParameter) {
     auto* p = b.BlockParam("my_param", ty.f32());
     b.Append(f->Block(), [&] {
         auto* l = b.Loop();
+        b.Append(l->Initializer(), [&] { b.NextIteration(l, nullptr); });
         l->Body()->SetParams({p});
         b.Append(l->Body(), [&] { b.ExitLoop(l); });
         b.Return(f);
@@ -495,15 +687,18 @@ TEST_F(IR_ValidatorTest, Block_DeadParameter) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_EQ(res.Failure().reason.Str(),
-              R"(:4:12 error: destroyed parameter found in block parameter list
-      $B2 (%my_param:f32): {  # body
+              R"(:7:12 error: destroyed parameter found in block parameter list
+      $B3 (%my_param:f32): {  # body
            ^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    loop [b: $B2] {  # loop_1
-      $B2 (%my_param:f32): {  # body
+    loop [i: $B2, b: $B3] {  # loop_1
+      $B2: {  # initializer
+        next_iteration undef  # -> $B3
+      }
+      $B3 (%my_param:f32): {  # body
         exit_loop  # loop_1
       }
     }
@@ -519,6 +714,7 @@ TEST_F(IR_ValidatorTest, Block_ParameterWithNullBlock) {
     auto* p = b.BlockParam("my_param", ty.f32());
     b.Append(f->Block(), [&] {
         auto* l = b.Loop();
+        b.Append(l->Initializer(), [&] { b.NextIteration(l, nullptr); });
         l->Body()->SetParams({p});
         b.Append(l->Body(), [&] { b.ExitLoop(l); });
         b.Return(f);
@@ -529,15 +725,18 @@ TEST_F(IR_ValidatorTest, Block_ParameterWithNullBlock) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_EQ(res.Failure().reason.Str(),
-              R"(:4:12 error: block parameter has nullptr parent block
-      $B2 (%my_param:f32): {  # body
+              R"(:7:12 error: block parameter has nullptr parent block
+      $B3 (%my_param:f32): {  # body
            ^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    loop [b: $B2] {  # loop_1
-      $B2 (%my_param:f32): {  # body
+    loop [i: $B2, b: $B3] {  # loop_1
+      $B2: {  # initializer
+        next_iteration undef  # -> $B3
+      }
+      $B3 (%my_param:f32): {  # body
         exit_loop  # loop_1
       }
     }
@@ -553,6 +752,7 @@ TEST_F(IR_ValidatorTest, Block_ParameterUsedInMultipleBlocks) {
     auto* p = b.BlockParam("my_param", ty.f32());
     b.Append(f->Block(), [&] {
         auto* l = b.Loop();
+        b.Append(l->Initializer(), [&] { b.NextIteration(l, nullptr); });
         l->Body()->SetParams({p});
         b.Append(l->Body(), [&] { b.Continue(l, p); });
         l->Continuing()->SetParams({p});
@@ -563,23 +763,26 @@ TEST_F(IR_ValidatorTest, Block_ParameterUsedInMultipleBlocks) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_EQ(res.Failure().reason.Str(),
-              R"(:4:12 error: block parameter has incorrect parent block
-      $B2 (%my_param:f32): {  # body
+              R"(:7:12 error: block parameter has incorrect parent block
+      $B3 (%my_param:f32): {  # body
            ^^^^^^^^^
 
-:7:7 note: parent block declared here
-      $B3 (%my_param:f32): {  # continuing
+:10:7 note: parent block declared here
+      $B4 (%my_param:f32): {  # continuing
       ^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    loop [b: $B2, c: $B3] {  # loop_1
-      $B2 (%my_param:f32): {  # body
-        continue %my_param  # -> $B3
+    loop [i: $B2, b: $B3, c: $B4] {  # loop_1
+      $B2: {  # initializer
+        next_iteration undef  # -> $B3
       }
-      $B3 (%my_param:f32): {  # continuing
-        next_iteration %my_param  # -> $B2
+      $B3 (%my_param:f32): {  # body
+        continue %my_param  # -> $B4
+      }
+      $B4 (%my_param:f32): {  # continuing
+        next_iteration %my_param  # -> $B3
       }
     }
     ret
@@ -1144,7 +1347,7 @@ TEST_F(IR_ValidatorTest, Block_TerminatorInMiddle) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_EQ(res.Failure().reason.Str(),
-              R"(:3:5 error: return: block terminator which isn't the final instruction
+              R"(:3:5 error: return: must be the last instruction in the block
     ret
     ^^^
 
@@ -1914,9 +2117,8 @@ TEST_F(IR_ValidatorTest, ExitIf_LessOperandsThenIfParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_if: args count (1) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_if: provides 1 value but 'if' expects 2 values
         exit_if 1i  # if_1
         ^^^^^^^^^^
 
@@ -1924,7 +2126,7 @@ TEST_F(IR_ValidatorTest, ExitIf_LessOperandsThenIfParams) {
       $B2: {  # true
       ^^^
 
-:3:5 note: control instruction
+:3:5 note: 'if' declared here
     %2:i32, %3:f32 = if true [t: $B2] {  # if_1
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -1958,9 +2160,8 @@ TEST_F(IR_ValidatorTest, ExitIf_MoreOperandsThenIfParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_if: args count (3) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_if: provides 3 values but 'if' expects 2 values
         exit_if 1i, 2.0f, 3i  # if_1
         ^^^^^^^^^^^^^^^^^^^^
 
@@ -1968,7 +2169,7 @@ TEST_F(IR_ValidatorTest, ExitIf_MoreOperandsThenIfParams) {
       $B2: {  # true
       ^^^
 
-:3:5 note: control instruction
+:3:5 note: 'if' declared here
     %2:i32, %3:f32 = if true [t: $B2] {  # if_1
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -2019,9 +2220,8 @@ TEST_F(IR_ValidatorTest, ExitIf_IncorrectResultType) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:21 error: exit_if: argument type 'f32' does not match control instruction type 'i32'
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:21 error: exit_if: operand with type 'i32' does not match 'if' target type 'f32'
         exit_if 1i, 2i  # if_1
                     ^^
 
@@ -2029,9 +2229,9 @@ TEST_F(IR_ValidatorTest, ExitIf_IncorrectResultType) {
       $B2: {  # true
       ^^^
 
-:3:5 note: control instruction
+:3:13 note: %3 declared here
     %2:i32, %3:f32 = if true [t: $B2] {  # if_1
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
@@ -2146,7 +2346,7 @@ TEST_F(IR_ValidatorTest, ExitIf_InvalidJumpOverSwitch) {
         b.ExitIf(if_outer);
     });
 
-    auto* c = b.Case(switch_inner, {b.Constant(1_i)});
+    auto* c = b.Case(switch_inner, {b.Constant(1_i), nullptr});
     b.Append(c, [&] { b.ExitIf(if_outer); });
 
     b.Append(f->Block(), [&] {
@@ -2166,15 +2366,15 @@ TEST_F(IR_ValidatorTest, ExitIf_InvalidJumpOverSwitch) {
           ^^^
 
 :5:9 note: first control instruction jumped
-        switch 1i [c: (1i, $B3)] {  # switch_1
-        ^^^^^^^^^^^^^^^^^^^^^^^^
+        switch 1i [c: (1i default, $B3)] {  # switch_1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
     if true [t: $B2] {  # if_1
       $B2: {  # true
-        switch 1i [c: (1i, $B3)] {  # switch_1
+        switch 1i [c: (1i default, $B3)] {  # switch_1
           $B3: {  # case
             exit_if  # if_1
           }
@@ -2241,7 +2441,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* def = b.DefaultCase(switch_);
     def->Append(b.ExitSwitch(switch_));
@@ -2255,7 +2455,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch) {
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_NullSwitch) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* def = b.DefaultCase(switch_);
     def->Append(mod.allocators.instructions.Create<ExitSwitch>(nullptr));
@@ -2279,7 +2479,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_NullSwitch) {
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    switch true [c: (default, $B2)] {  # switch_1
+    switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         exit_switch  # undef
       }
@@ -2291,7 +2491,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_LessOperandsThenSwitchParams) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* r1 = b.InstructionResult(ty.i32());
     auto* r2 = b.InstructionResult(ty.f32());
@@ -2307,9 +2507,8 @@ TEST_F(IR_ValidatorTest, ExitSwitch_LessOperandsThenSwitchParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_switch: args count (1) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_switch: provides 1 value but 'switch' expects 2 values
         exit_switch 1i  # switch_1
         ^^^^^^^^^^^^^^
 
@@ -2317,14 +2516,14 @@ TEST_F(IR_ValidatorTest, ExitSwitch_LessOperandsThenSwitchParams) {
       $B2: {  # case
       ^^^
 
-:3:5 note: control instruction
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:3:5 note: 'switch' declared here
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         exit_switch 1i  # switch_1
       }
@@ -2336,7 +2535,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_MoreOperandsThenSwitchParams) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
     auto* r1 = b.InstructionResult(ty.i32());
     auto* r2 = b.InstructionResult(ty.f32());
     switch_->SetResults(Vector{r1, r2});
@@ -2351,9 +2550,8 @@ TEST_F(IR_ValidatorTest, ExitSwitch_MoreOperandsThenSwitchParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_switch: args count (3) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_switch: provides 3 values but 'switch' expects 2 values
         exit_switch 1i, 2.0f, 3i  # switch_1
         ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -2361,14 +2559,14 @@ TEST_F(IR_ValidatorTest, ExitSwitch_MoreOperandsThenSwitchParams) {
       $B2: {  # case
       ^^^
 
-:3:5 note: control instruction
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:3:5 note: 'switch' declared here
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         exit_switch 1i, 2.0f, 3i  # switch_1
       }
@@ -2380,7 +2578,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_WithResult) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
     auto* r1 = b.InstructionResult(ty.i32());
     auto* r2 = b.InstructionResult(ty.f32());
     switch_->SetResults(Vector{r1, r2});
@@ -2398,7 +2596,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_WithResult) {
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_IncorrectResultType) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
     auto* r1 = b.InstructionResult(ty.i32());
     auto* r2 = b.InstructionResult(ty.f32());
     switch_->SetResults(Vector{r1, r2});
@@ -2415,7 +2613,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_IncorrectResultType) {
     ASSERT_NE(res, Success);
     EXPECT_EQ(
         res.Failure().reason.Str(),
-        R"(:5:25 error: exit_switch: argument type 'f32' does not match control instruction type 'i32'
+        R"(:5:25 error: exit_switch: operand with type 'i32' does not match 'switch' target type 'f32'
         exit_switch 1i, 2i  # switch_1
                         ^^
 
@@ -2423,14 +2621,14 @@ TEST_F(IR_ValidatorTest, ExitSwitch_IncorrectResultType) {
       $B2: {  # case
       ^^^
 
-:3:5 note: control instruction
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:3:13 note: %3 declared here
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
+            ^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    %2:i32, %3:f32 = switch true [c: (default, $B2)] {  # switch_1
+    %2:i32, %3:f32 = switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         exit_switch 1i, 2i  # switch_1
       }
@@ -2442,7 +2640,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_NotInParentSwitch) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* f = b.Function("my_func", ty.void_());
 
@@ -2470,7 +2668,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_NotInParentSwitch) {
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    switch true [c: (default, $B2)] {  # switch_1
+    switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         ret
       }
@@ -2496,7 +2694,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_JumpsOverIfs) {
     //     }
     //     break;
     //  }
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* f = b.Function("my_func", ty.void_());
 
@@ -2519,11 +2717,11 @@ TEST_F(IR_ValidatorTest, ExitSwitch_JumpsOverIfs) {
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_InvalidJumpOverSwitch) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* def = b.DefaultCase(switch_);
     b.Append(def, [&] {
-        auto* inner = b.Switch(false);
+        auto* inner = b.Switch(0_i);
         b.ExitSwitch(switch_);
 
         auto* inner_def = b.DefaultCase(inner);
@@ -2549,15 +2747,15 @@ TEST_F(IR_ValidatorTest, ExitSwitch_InvalidJumpOverSwitch) {
           ^^^
 
 :5:9 note: first control instruction jumped
-        switch false [c: (default, $B3)] {  # switch_2
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        switch 0i [c: (default, $B3)] {  # switch_2
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    switch true [c: (default, $B2)] {  # switch_1
+    switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
-        switch false [c: (default, $B3)] {  # switch_2
+        switch 0i [c: (default, $B3)] {  # switch_2
           $B3: {  # case
             exit_switch  # switch_1
           }
@@ -2572,7 +2770,7 @@ note: # Disassembly
 }
 
 TEST_F(IR_ValidatorTest, ExitSwitch_InvalidJumpOverLoop) {
-    auto* switch_ = b.Switch(true);
+    auto* switch_ = b.Switch(1_i);
 
     auto* def = b.DefaultCase(switch_);
     b.Append(def, [&] {
@@ -2606,7 +2804,7 @@ TEST_F(IR_ValidatorTest, ExitSwitch_InvalidJumpOverLoop) {
 note: # Disassembly
 %my_func = func():void {
   $B1: {
-    switch true [c: (default, $B2)] {  # switch_1
+    switch 1i [c: (default, $B2)] {  # switch_1
       $B2: {  # case
         loop [b: $B3] {  # loop_1
           $B3: {  # body
@@ -2622,7 +2820,7 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, ContinueOutsideOfLoop) {
+TEST_F(IR_ValidatorTest, Continue_OutsideOfLoop) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2655,7 +2853,7 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, ContinueInLoopInit) {
+TEST_F(IR_ValidatorTest, Continue_InLoopInit) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2692,7 +2890,7 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, ContinueInLoopBody) {
+TEST_F(IR_ValidatorTest, Continue_InLoopBody) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2704,7 +2902,7 @@ TEST_F(IR_ValidatorTest, ContinueInLoopBody) {
     ASSERT_EQ(res, Success);
 }
 
-TEST_F(IR_ValidatorTest, ContinueInLoopContinuing) {
+TEST_F(IR_ValidatorTest, Continue_InLoopContinuing) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2741,7 +2939,161 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, NextIterationOutsideOfLoop) {
+TEST_F(IR_ValidatorTest, Continue_UnexpectedValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        b.Append(loop->Body(), [&] { b.Continue(loop, 1_i, 2_f); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: continue: provides 2 values but 'loop' block $B3 expects 0 values
+        continue 1i, 2.0f  # -> $B3
+        ^^^^^^^^^^^^^^^^^
+
+:4:7 note: in block
+      $B2: {  # body
+      ^^^
+
+:7:7 note: 'loop' block $B3 declared here
+      $B3: {  # continuing
+      ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue 1i, 2.0f  # -> $B3
+      }
+      $B3: {  # continuing
+        break_if true  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Continue_MissingValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Continuing()->SetParams({b.BlockParam<i32>(), b.BlockParam<i32>()});
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: continue: provides 0 values but 'loop' block $B3 expects 2 values
+        continue  # -> $B3
+        ^^^^^^^^
+
+:4:7 note: in block
+      $B2: {  # body
+      ^^^
+
+:7:7 note: 'loop' block $B3 declared here
+      $B3 (%2:i32, %3:i32): {  # continuing
+      ^^^^^^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue  # -> $B3
+      }
+      $B3 (%2:i32, %3:i32): {  # continuing
+        break_if true  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Continue_MismatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Continuing()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Body(), [&] { b.Continue(loop, 1_i, 2_i, 3_f, false); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(
+        res.Failure().reason.Str(),
+        R"(:5:22 error: continue: operand with type 'i32' does not match 'loop' block $B3 target type 'f32'
+        continue 1i, 2i, 3.0f, false  # -> $B3
+                     ^^
+
+:4:7 note: in block
+      $B2: {  # body
+      ^^^
+
+:7:20 note: %3 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # continuing
+                   ^^
+
+:5:26 error: continue: operand with type 'f32' does not match 'loop' block $B3 target type 'u32'
+        continue 1i, 2i, 3.0f, false  # -> $B3
+                         ^^^^
+
+:4:7 note: in block
+      $B2: {  # body
+      ^^^
+
+:7:28 note: %4 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # continuing
+                           ^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue 1i, 2i, 3.0f, false  # -> $B3
+      }
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # continuing
+        break_if true  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Continue_MatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Continuing()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Body(), [&] { b.Continue(loop, 1_i, 2_f, 3_u, false); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success);
+}
+
+TEST_F(IR_ValidatorTest, NextIteration_OutsideOfLoop) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2774,7 +3126,7 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, NextIterationInLoopInit) {
+TEST_F(IR_ValidatorTest, NextIteration_InLoopInit) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2787,7 +3139,7 @@ TEST_F(IR_ValidatorTest, NextIterationInLoopInit) {
     ASSERT_EQ(res, Success);
 }
 
-TEST_F(IR_ValidatorTest, NextIterationInLoopBody) {
+TEST_F(IR_ValidatorTest, NextIteration_InLoopBody) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2820,7 +3172,7 @@ note: # Disassembly
 )");
 }
 
-TEST_F(IR_ValidatorTest, NextIterationInLoopContinuing) {
+TEST_F(IR_ValidatorTest, NextIteration_InLoopContinuing) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
         auto* loop = b.Loop();
@@ -2831,6 +3183,194 @@ TEST_F(IR_ValidatorTest, NextIterationInLoopContinuing) {
 
     auto res = ir::Validate(mod);
     ASSERT_EQ(res, Success);
+}
+
+TEST_F(IR_ValidatorTest, NextIteration_UnexpectedValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        b.Append(loop->Initializer(), [&] { b.NextIteration(loop, 1_i, 2_f); });
+        b.Append(loop->Body(), [&] { b.ExitLoop(loop); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: next_iteration: provides 2 values but 'loop' block $B3 expects 0 values
+        next_iteration 1i, 2.0f  # -> $B3
+        ^^^^^^^^^^^^^^^^^^^^^^^
+
+:4:7 note: in block
+      $B2: {  # initializer
+      ^^^
+
+:7:7 note: 'loop' block $B3 declared here
+      $B3: {  # body
+      ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [i: $B2, b: $B3] {  # loop_1
+      $B2: {  # initializer
+        next_iteration 1i, 2.0f  # -> $B3
+      }
+      $B3: {  # body
+        exit_loop  # loop_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, NextIteration_MissingValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams({b.BlockParam<i32>(), b.BlockParam<i32>()});
+        b.Append(loop->Initializer(), [&] { b.NextIteration(loop); });
+        b.Append(loop->Body(), [&] { b.ExitLoop(loop); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: next_iteration: provides 0 values but 'loop' block $B3 expects 2 values
+        next_iteration  # -> $B3
+        ^^^^^^^^^^^^^^
+
+:4:7 note: in block
+      $B2: {  # initializer
+      ^^^
+
+:7:7 note: 'loop' block $B3 declared here
+      $B3 (%2:i32, %3:i32): {  # body
+      ^^^^^^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [i: $B2, b: $B3] {  # loop_1
+      $B2: {  # initializer
+        next_iteration  # -> $B3
+      }
+      $B3 (%2:i32, %3:i32): {  # body
+        exit_loop  # loop_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, NextIteration_MismatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Initializer(), [&] { b.NextIteration(loop, 1_i, 2_i, 3_f, false); });
+        b.Append(loop->Body(), [&] { b.ExitLoop(loop); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(
+        res.Failure().reason.Str(),
+        R"(:5:28 error: next_iteration: operand with type 'i32' does not match 'loop' block $B3 target type 'f32'
+        next_iteration 1i, 2i, 3.0f, false  # -> $B3
+                           ^^
+
+:4:7 note: in block
+      $B2: {  # initializer
+      ^^^
+
+:7:20 note: %3 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+                   ^^
+
+:5:32 error: next_iteration: operand with type 'f32' does not match 'loop' block $B3 target type 'u32'
+        next_iteration 1i, 2i, 3.0f, false  # -> $B3
+                               ^^^^
+
+:4:7 note: in block
+      $B2: {  # initializer
+      ^^^
+
+:7:28 note: %4 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+                           ^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [i: $B2, b: $B3] {  # loop_1
+      $B2: {  # initializer
+        next_iteration 1i, 2i, 3.0f, false  # -> $B3
+      }
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+        exit_loop  # loop_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, NextIteration_MatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Initializer(), [&] { b.NextIteration(loop, 1_i, 2_f, 3_u, false); });
+        b.Append(loop->Body(), [&] { b.ExitLoop(loop); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success);
+}
+
+TEST_F(IR_ValidatorTest, LoopBodyParamsWithoutInitializer) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams({b.BlockParam<i32>(), b.BlockParam<i32>()});
+        b.Append(loop->Body(), [&] { b.ExitLoop(loop); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:3:5 error: loop: loop with body block parameters must have an initializer
+    loop [b: $B2] {  # loop_1
+    ^^^^^^^^^^^^^
+
+:2:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2] {  # loop_1
+      $B2 (%2:i32, %3:i32): {  # body
+        exit_loop  # loop_1
+      }
+    }
+    ret
+  }
+}
+)");
 }
 
 TEST_F(IR_ValidatorTest, ContinuingUseValueBeforeContinue) {
@@ -2914,6 +3454,329 @@ note: # Disassembly
 )");
 }
 
+TEST_F(IR_ValidatorTest, BreakIf_NextIterUnexpectedValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true, b.Values(1_i, 2_i), Empty); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:8:9 error: break_if: provides 2 values but 'loop' block $B2 expects 0 values
+        break_if true next_iteration: [ 1i, 2i ]  # -> [t: exit_loop loop_1, f: $B2]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:7:7 note: in block
+      $B3: {  # continuing
+      ^^^
+
+:4:7 note: 'loop' block $B2 declared here
+      $B2: {  # body
+      ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue  # -> $B3
+      }
+      $B3: {  # continuing
+        break_if true next_iteration: [ 1i, 2i ]  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_NextIterMissingValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams({b.BlockParam<i32>(), b.BlockParam<i32>()});
+        b.Append(loop->Initializer(), [&] { b.NextIteration(loop, nullptr, nullptr); });
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true, Empty, Empty); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:11:9 error: break_if: provides 0 values but 'loop' block $B3 expects 2 values
+        break_if true  # -> [t: exit_loop loop_1, f: $B3]
+        ^^^^^^^^^^^^^
+
+:10:7 note: in block
+      $B4: {  # continuing
+      ^^^
+
+:7:7 note: 'loop' block $B3 declared here
+      $B3 (%2:i32, %3:i32): {  # body
+      ^^^^^^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [i: $B2, b: $B3, c: $B4] {  # loop_1
+      $B2: {  # initializer
+        next_iteration undef, undef  # -> $B3
+      }
+      $B3 (%2:i32, %3:i32): {  # body
+        continue  # -> $B4
+      }
+      $B4: {  # continuing
+        break_if true  # -> [t: exit_loop loop_1, f: $B3]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_NextIterMismatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Initializer(),
+                 [&] { b.NextIteration(loop, nullptr, nullptr, nullptr, nullptr); });
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(),
+                 [&] { b.BreakIf(loop, true, b.Values(1_i, 2_i, 3_f, false), Empty); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(
+        res.Failure().reason.Str(),
+        R"(:11:45 error: break_if: operand with type 'i32' does not match 'loop' block $B3 target type 'f32'
+        break_if true next_iteration: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B3]
+                                            ^^
+
+:10:7 note: in block
+      $B4: {  # continuing
+      ^^^
+
+:7:20 note: %3 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+                   ^^
+
+:11:49 error: break_if: operand with type 'f32' does not match 'loop' block $B3 target type 'u32'
+        break_if true next_iteration: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B3]
+                                                ^^^^
+
+:10:7 note: in block
+      $B4: {  # continuing
+      ^^^
+
+:7:28 note: %4 declared here
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+                           ^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [i: $B2, b: $B3, c: $B4] {  # loop_1
+      $B2: {  # initializer
+        next_iteration undef, undef, undef, undef  # -> $B3
+      }
+      $B3 (%2:i32, %3:f32, %4:u32, %5:bool): {  # body
+        continue  # -> $B4
+      }
+      $B4: {  # continuing
+        break_if true next_iteration: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B3]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_NextIterMatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->Body()->SetParams(
+            {b.BlockParam<i32>(), b.BlockParam<f32>(), b.BlockParam<u32>(), b.BlockParam<bool>()});
+        b.Append(loop->Initializer(),
+                 [&] { b.NextIteration(loop, nullptr, nullptr, nullptr, nullptr); });
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(),
+                 [&] { b.BreakIf(loop, true, b.Values(1_i, 2_f, 3_u, false), Empty); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success);
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_ExitUnexpectedValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true, Empty, b.Values(1_i, 2_i)); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:8:9 error: break_if: provides 2 values but 'loop' expects 0 values
+        break_if true exit_loop: [ 1i, 2i ]  # -> [t: exit_loop loop_1, f: $B2]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:7:7 note: in block
+      $B3: {  # continuing
+      ^^^
+
+:3:5 note: 'loop' declared here
+    loop [b: $B2, c: $B3] {  # loop_1
+    ^^^^^^^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue  # -> $B3
+      }
+      $B3: {  # continuing
+        break_if true exit_loop: [ 1i, 2i ]  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_ExitMissingValues) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->SetResults(b.InstructionResult<i32>(), b.InstructionResult<i32>());
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, true, Empty, Empty); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:8:9 error: break_if: provides 0 values but 'loop' expects 2 values
+        break_if true  # -> [t: exit_loop loop_1, f: $B2]
+        ^^^^^^^^^^^^^
+
+:7:7 note: in block
+      $B3: {  # continuing
+      ^^^
+
+:3:5 note: 'loop' declared here
+    %2:i32, %3:i32 = loop [b: $B2, c: $B3] {  # loop_1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    %2:i32, %3:i32 = loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue  # -> $B3
+      }
+      $B3: {  # continuing
+        break_if true  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_ExitMismatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->SetResults(b.InstructionResult<i32>(), b.InstructionResult<f32>(),
+                         b.InstructionResult<u32>(), b.InstructionResult<bool>());
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(),
+                 [&] { b.BreakIf(loop, true, Empty, b.Values(1_i, 2_i, 3_f, false)); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(
+        res.Failure().reason.Str(),
+        R"(:8:40 error: break_if: operand with type 'i32' does not match 'loop' target type 'f32'
+        break_if true exit_loop: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B2]
+                                       ^^
+
+:7:7 note: in block
+      $B3: {  # continuing
+      ^^^
+
+:3:13 note: %3 declared here
+    %2:i32, %3:f32, %4:u32, %5:bool = loop [b: $B2, c: $B3] {  # loop_1
+            ^^^^^^
+
+:8:44 error: break_if: operand with type 'f32' does not match 'loop' target type 'u32'
+        break_if true exit_loop: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B2]
+                                           ^^^^
+
+:7:7 note: in block
+      $B3: {  # continuing
+      ^^^
+
+:3:21 note: %4 declared here
+    %2:i32, %3:f32, %4:u32, %5:bool = loop [b: $B2, c: $B3] {  # loop_1
+                    ^^^^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    %2:i32, %3:f32, %4:u32, %5:bool = loop [b: $B2, c: $B3] {  # loop_1
+      $B2: {  # body
+        continue  # -> $B3
+      }
+      $B3: {  # continuing
+        break_if true exit_loop: [ 1i, 2i, 3.0f, false ]  # -> [t: exit_loop loop_1, f: $B2]
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, BreakIf_ExitMatchedTypes) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->SetResults(b.InstructionResult<i32>(), b.InstructionResult<f32>(),
+                         b.InstructionResult<u32>(), b.InstructionResult<bool>());
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(),
+                 [&] { b.BreakIf(loop, true, Empty, b.Values(1_i, 2_f, 3_u, false)); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_EQ(res, Success);
+}
+
 TEST_F(IR_ValidatorTest, ExitLoop) {
     auto* loop = b.Loop();
     loop->Continuing()->Append(b.NextIteration(loop));
@@ -2981,9 +3844,8 @@ TEST_F(IR_ValidatorTest, ExitLoop_LessOperandsThenLoopParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_loop: args count (1) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_loop: provides 1 value but 'loop' expects 2 values
         exit_loop 1i  # loop_1
         ^^^^^^^^^^^^
 
@@ -2991,7 +3853,7 @@ TEST_F(IR_ValidatorTest, ExitLoop_LessOperandsThenLoopParams) {
       $B2: {  # body
       ^^^
 
-:3:5 note: control instruction
+:3:5 note: 'loop' declared here
     %2:i32, %3:f32 = loop [b: $B2, c: $B3] {  # loop_1
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -3028,9 +3890,8 @@ TEST_F(IR_ValidatorTest, ExitLoop_MoreOperandsThenLoopParams) {
 
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
-    EXPECT_EQ(
-        res.Failure().reason.Str(),
-        R"(:5:9 error: exit_loop: args count (3) does not match control instruction result count (2)
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:5:9 error: exit_loop: provides 3 values but 'loop' expects 2 values
         exit_loop 1i, 2.0f, 3i  # loop_1
         ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -3038,7 +3899,7 @@ TEST_F(IR_ValidatorTest, ExitLoop_MoreOperandsThenLoopParams) {
       $B2: {  # body
       ^^^
 
-:3:5 note: control instruction
+:3:5 note: 'loop' declared here
     %2:i32, %3:f32 = loop [b: $B2, c: $B3] {  # loop_1
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -3095,7 +3956,7 @@ TEST_F(IR_ValidatorTest, ExitLoop_IncorrectResultType) {
     ASSERT_NE(res, Success);
     EXPECT_EQ(
         res.Failure().reason.Str(),
-        R"(:5:23 error: exit_loop: argument type 'f32' does not match control instruction type 'i32'
+        R"(:5:23 error: exit_loop: operand with type 'i32' does not match 'loop' target type 'f32'
         exit_loop 1i, 2i  # loop_1
                       ^^
 
@@ -3103,9 +3964,9 @@ TEST_F(IR_ValidatorTest, ExitLoop_IncorrectResultType) {
       $B2: {  # body
       ^^^
 
-:3:5 note: control instruction
+:3:13 note: %3 declared here
     %2:i32, %3:f32 = loop [b: $B2, c: $B3] {  # loop_1
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
@@ -3207,7 +4068,7 @@ TEST_F(IR_ValidatorTest, ExitLoop_InvalidJumpOverSwitch) {
     loop->Continuing()->Append(b.NextIteration(loop));
 
     b.Append(loop->Body(), [&] {
-        auto* inner = b.Switch(false);
+        auto* inner = b.Switch(1_i);
         b.ExitLoop(loop);
 
         auto* inner_def = b.DefaultCase(inner);
@@ -3233,15 +4094,15 @@ TEST_F(IR_ValidatorTest, ExitLoop_InvalidJumpOverSwitch) {
           ^^^
 
 :5:9 note: first control instruction jumped
-        switch false [c: (default, $B4)] {  # switch_1
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        switch 1i [c: (default, $B4)] {  # switch_1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 note: # Disassembly
 %my_func = func():void {
   $B1: {
     loop [b: $B2, c: $B3] {  # loop_1
       $B2: {  # body
-        switch false [c: (default, $B4)] {  # switch_1
+        switch 1i [c: (default, $B4)] {  # switch_1
           $B4: {  # case
             exit_loop  # loop_1
           }
@@ -3797,9 +4658,9 @@ TEST_F(IR_ValidatorTest, Store_TargetNotMemoryView) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_EQ(res.Failure().reason.Str(),
-              R"(:4:15 error: store: store target operand is not a memory view
+              R"(:4:11 error: store: store target operand is not a memory view
     store %l, 42u
-              ^^^
+          ^^
 
 :2:3 note: in block
   $B1: {
@@ -4181,5 +5042,131 @@ INSTANTIATE_TEST_SUITE_P(RefTypes,
                                           testing::Values(RefTypeBuilder<i32>,
                                                           RefTypeBuilder<bool>,
                                                           RefTypeBuilder<vec4<f32>>)));
+
+TEST_F(IR_ValidatorTest, Switch_NoCondition) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    auto* s = b.ir.allocators.instructions.Create<ir::Switch>();
+    f->Block()->Append(s);
+    b.Append(b.DefaultCase(s), [&] { b.ExitSwitch(s); });
+    f->Block()->Append(b.Return(f));
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(), R"(error: switch: operand is undefined
+:2:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    switch undef [c: (default, $B2)] {  # switch_1
+      $B2: {  # case
+        exit_switch  # switch_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Switch_ConditionPointer) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* s = b.Switch(b.Var("a", b.Zero<i32>()));
+        b.Append(b.DefaultCase(s), [&] { b.ExitSwitch(s); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(error: switch: condition type must be an integer scalar
+:2:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    %a:ptr<function, i32, read_write> = var, 0i
+    switch %a [c: (default, $B2)] {  # switch_1
+      $B2: {  # case
+        exit_switch  # switch_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Switch_NoCases) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        b.Switch(1_i);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:3:5 error: switch: missing default case for switch
+    switch 1i [] {  # switch_1
+    ^^^^^^^^^^^^
+
+:2:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    switch 1i [] {  # switch_1
+    }
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_ValidatorTest, Switch_NoDefaultCase) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* s = b.Switch(1_i);
+        b.Append(b.Case(s, {b.Constant(0_i)}), [&] { b.ExitSwitch(s); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_EQ(res.Failure().reason.Str(),
+              R"(:3:5 error: switch: missing default case for switch
+    switch 1i [c: (0i, $B2)] {  # switch_1
+    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+:2:3 note: in block
+  $B1: {
+  ^^^
+
+note: # Disassembly
+%my_func = func():void {
+  $B1: {
+    switch 1i [c: (0i, $B2)] {  # switch_1
+      $B2: {  # case
+        exit_switch  # switch_1
+      }
+    }
+    ret
+  }
+}
+)");
+}
+
 }  // namespace
 }  // namespace tint::core::ir

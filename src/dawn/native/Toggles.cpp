@@ -340,6 +340,13 @@ static constexpr ToggleEnumAndInfoList kToggleNameAndInfoList = {{
       "This toggle is enabled by default on Metal backend where GPU counters cannot be stored to"
       "sampleBufferAttachments on empty blit encoder.",
       "https://crbug.com/dawn/1473", ToggleStage::Device}},
+    {Toggle::MetalDisableTimestampPeriodEstimation,
+     {"metal_disable_timestamp_period_estimation",
+      "Calling sampleTimestamps:gpuTimestamp: from MTLDevice to estimate timestamp period leads to "
+      "GPU overheating on some specific Intel GPUs due to driver issue, such as Intel Iris "
+      "Plus Graphics 655. Enable this workaround to skip timestamp period estimation and use a "
+      "default value instead on the specific GPUs.",
+      "https://crbug.com/342701242", ToggleStage::Device}},
     {Toggle::VulkanSplitCommandBufferOnComputePassAfterRenderPass,
      {"vulkan_split_command_buffer_on_compute_pass_after_render_pass",
       "Splits any command buffer where a compute pass is recorded after a render pass. This "
@@ -542,6 +549,16 @@ static constexpr ToggleEnumAndInfoList kToggleNameAndInfoList = {{
       "Only use shader model 6.5 or less for D3D12 backend, to workaround issues on some Intel "
       "devices.",
       "https://crbug.com/dawn/2470", ToggleStage::Adapter}},
+    {Toggle::UsePackedDepth24UnormStencil8Format,
+     {"use_packed_depth24_unorm_stencil8_format",
+      "Use a packed depth24_unorm_stencil8 format like DXGI_FORMAT_D24_UNORM_STENCIL8_UINT on D3D "
+      "for wgpu::TextureFormat::Depth24PlusStencil8.",
+      "https://crbug.com/341254292", ToggleStage::Device}},
+    {Toggle::D3D12ForceStencilComponentReplicateSwizzle,
+     {"d3d12_force_stencil_component_replicate_swizzle",
+      "Force a replicate swizzle for the stencil component i.e. (ssss) instead of (s001) to "
+      "workaround issues on certain Nvidia drivers on D3D12 with depth24_unorm_stencil8 format.",
+      "https://crbug.com/341254292", ToggleStage::Device}},
     {Toggle::NoWorkaroundSampleMaskBecomesZeroForAllButLastColorTarget,
      {"no_workaround_sample_mask_becomes_zero_for_all_but_last_color_target",
       "MacOS 12.0+ Intel has a bug where the sample mask is only applied for the last color "
@@ -571,6 +588,11 @@ static constexpr ToggleEnumAndInfoList kToggleNameAndInfoList = {{
     {Toggle::D3D11UseUnmonitoredFence,
      {"d3d11_use_unmonitored_fence", "Use d3d11 unmonitored fence.",
       "https://crbug.com/chromium/335553337", ToggleStage::Device}},
+    {Toggle::IgnoreImportedAHardwareBufferVulkanImageSize,
+     {"ignore_imported_ahardwarebuffer_vulkan_image_size",
+      "Don't validate the required VkImage size against the size of the AHardwareBuffer on import. "
+      "Some drivers report the wrong size.",
+      "https://crbug.com/333424893", ToggleStage::Device}},
     // Comment to separate the }} so it is clearer what to copy-paste to add a toggle.
 }};
 }  // anonymous namespace

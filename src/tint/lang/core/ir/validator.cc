@@ -27,9 +27,11 @@
 
 #include "src/tint/lang/core/ir/validator.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "src/tint/lang/core/intrinsic/table.h"
@@ -44,7 +46,7 @@
 #include "src/tint/lang/core/ir/control_instruction.h"
 #include "src/tint/lang/core/ir/convert.h"
 #include "src/tint/lang/core/ir/core_builtin_call.h"
-#include "src/tint/lang/core/ir/disassembly.h"
+#include "src/tint/lang/core/ir/disassembler.h"
 #include "src/tint/lang/core/ir/discard.h"
 #include "src/tint/lang/core/ir/exit_if.h"
 #include "src/tint/lang/core/ir/exit_loop.h"
@@ -58,6 +60,7 @@
 #include "src/tint/lang/core/ir/load.h"
 #include "src/tint/lang/core/ir/load_vector_element.h"
 #include "src/tint/lang/core/ir/loop.h"
+#include "src/tint/lang/core/ir/member_builtin_call.h"
 #include "src/tint/lang/core/ir/multi_in_block.h"
 #include "src/tint/lang/core/ir/next_iteration.h"
 #include "src/tint/lang/core/ir/return.h"
@@ -81,8 +84,11 @@
 #include "src/tint/utils/containers/predicates.h"
 #include "src/tint/utils/containers/reverse.h"
 #include "src/tint/utils/containers/transform.h"
+#include "src/tint/utils/diagnostic/diagnostic.h"
 #include "src/tint/utils/ice/ice.h"
 #include "src/tint/utils/macros/defer.h"
+#include "src/tint/utils/result/result.h"
+#include "src/tint/utils/rtti/castable.h"
 #include "src/tint/utils/rtti/switch.h"
 #include "src/tint/utils/text/styled_text.h"
 #include "src/tint/utils/text/text_style.h"
@@ -169,7 +175,7 @@ class Validator {
 
   private:
     /// @returns the IR disassembly, performing a disassemble if this is the first call.
-    ir::Disassembly& Disassembly();
+    ir::Disassembler& Disassemble();
 
     /// Adds an error for the @p inst and highlights the instruction in the disassembly
     /// @param inst the instruction
@@ -240,14 +246,56 @@ class Validator {
     /// @param src the source lines to highlight
     diag::Diagnostic& AddNote(Source src = {});
 
-    /// Adds a note to the diagnostics highlighting where the value was declared, if it has a source
+    /// Adds a note to the diagnostics highlighting where the value instruction or block is
+    /// declared, if it has a source location.
+    /// @param decl the value instruction or block
+    void AddDeclarationNote(const CastableBase* decl);
+
+    /// Adds a note to the diagnostics highlighting where the block is declared, if it has a source
     /// location.
-    /// @param value the value
-    void AddDeclarationNote(const Value* value);
+    /// @param block the block
+    void AddDeclarationNote(const Block* block);
+
+    /// Adds a note to the diagnostics highlighting where the block parameter is declared, if it
+    /// has a source location.
+    /// @param param the block parameter
+    void AddDeclarationNote(const BlockParam* param);
+
+    /// Adds a note to the diagnostics highlighting where the function is declared, if it has a
+    /// source location.
+    /// @param fn the function
+    void AddDeclarationNote(const Function* fn);
+
+    /// Adds a note to the diagnostics highlighting where the function parameter is declared, if it
+    /// has a source location.
+    /// @param param the function parameter
+    void AddDeclarationNote(const FunctionParam* param);
+
+    /// Adds a note to the diagnostics highlighting where the instruction is declared, if it has a
+    /// source location.
+    /// @param inst the inst
+    void AddDeclarationNote(const Instruction* inst);
+
+    /// Adds a note to the diagnostics highlighting where instruction result was declared, if it has
+    /// a source location.
+    /// @param res the res
+    void AddDeclarationNote(const InstructionResult* res);
+
+    /// @param decl the value, instruction or block to get the name for
+    /// @returns the styled name for the given value, instruction or block
+    StyledText NameOf(const CastableBase* decl);
 
     /// @param v the value to get the name for
-    /// @returns the name for the given value
+    /// @returns the styled name for the given value
     StyledText NameOf(const Value* v);
+
+    /// @param inst the instruction to get the name for
+    /// @returns the styled  name for the given instruction
+    StyledText NameOf(const Instruction* inst);
+
+    /// @param block the block to get the name for
+    /// @returns the styled  name for the given block
+    StyledText NameOf(const Block* block);
 
     /// Checks the given operand is not null
     /// @param inst the instruction
@@ -291,6 +339,14 @@ class Validator {
     /// @param call the call to validate
     void CheckBuiltinCall(const BuiltinCall* call);
 
+    /// Validates the given member builtin call
+    /// @param call the member call to validate
+    void CheckMemberBuiltinCall(const MemberBuiltinCall* call);
+
+    /// Validates the given construct
+    /// @param construct the construct to validate
+    void CheckConstruct(const Construct* construct);
+
     /// Validates the given user call
     /// @param call the call to validate
     void CheckUserCall(const UserCall* call);
@@ -315,6 +371,10 @@ class Validator {
     /// @param l the loop to validate
     void CheckLoop(const Loop* l);
 
+    /// Validates the loop body block
+    /// @param l the loop to validate
+    void CheckLoopBody(const Loop* l);
+
     /// Validates the loop continuing block
     /// @param l the loop to validate
     void CheckLoopContinuing(const Loop* l);
@@ -326,6 +386,10 @@ class Validator {
     /// Validates the given terminator
     /// @param b the terminator to validate
     void CheckTerminator(const Terminator* b);
+
+    /// Validates the break if instruction
+    /// @param b the break if to validate
+    void CheckBreakIf(const BreakIf* b);
 
     /// Validates the continue instruction
     /// @param c the continue to validate
@@ -377,6 +441,19 @@ class Validator {
     /// @param s the store vector element to validate
     void CheckStoreVectorElement(const StoreVectorElement* s);
 
+    /// Validates that the number and types of the source instruction operands match the target's
+    /// values.
+    /// @param source_inst the source instruction
+    /// @param source_operand_offset the index of the first operand of the source instruction
+    /// @param source_operand_count the number of operands of the source instruction
+    /// @param target the receiver of the operand values
+    /// @param target_values the receiver of the operand values
+    void CheckOperandsMatchTarget(const Instruction* source_inst,
+                                  size_t source_operand_offset,
+                                  size_t source_operand_count,
+                                  const CastableBase* target,
+                                  VectorRef<const Value*> target_values);
+
     /// @param inst the instruction
     /// @param idx the operand index
     /// @returns the vector pointer type for the given instruction operand
@@ -418,7 +495,7 @@ class Validator {
 
     const Module& mod_;
     Capabilities capabilities_;
-    std::optional<ir::Disassembly> disassembly_;  // Use Disassembly()
+    std::optional<ir::Disassembler> disassembler_;  // Use Disassemble()
     diag::List diagnostics_;
     Hashset<const Function*, 4> all_functions_;
     Hashset<const Instruction*, 4> visited_instructions_;
@@ -427,6 +504,8 @@ class Validator {
     Vector<const Block*, 8> block_stack_;
     ScopeStack scope_stack_;
     Vector<std::function<void()>, 16> tasks_;
+    SymbolTable symbols_ = SymbolTable::Wrap(mod_.symbols);
+    type::Manager type_mgr_ = type::Manager::Wrap(mod_.Types());
 };
 
 Validator::Validator(const Module& mod, Capabilities capabilities)
@@ -434,11 +513,11 @@ Validator::Validator(const Module& mod, Capabilities capabilities)
 
 Validator::~Validator() = default;
 
-Disassembly& Validator::Disassembly() {
-    if (!disassembly_) {
-        disassembly_.emplace(Disassemble(mod_));
+Disassembler& Validator::Disassemble() {
+    if (!disassembler_) {
+        disassembler_.emplace(ir::Disassembler(mod_));
     }
-    return *disassembly_;
+    return *disassembler_;
 }
 
 Result<SuccessType> Validator::Run() {
@@ -474,7 +553,7 @@ Result<SuccessType> Validator::Run() {
     }
 
     if (diagnostics_.ContainsErrors()) {
-        diagnostics_.AddNote(Source{}) << "# Disassembly\n" << Disassembly().Text();
+        diagnostics_.AddNote(Source{}) << "# Disassembly\n" << Disassemble().Text();
         return Failure{std::move(diagnostics_)};
     }
     return Success;
@@ -482,7 +561,7 @@ Result<SuccessType> Validator::Run() {
 
 diag::Diagnostic& Validator::AddError(const Instruction* inst) {
     diagnostics_.ReserveAdditional(2);  // Ensure diagnostics don't resize alive after AddNote()
-    auto src = Disassembly().InstructionSource(inst);
+    auto src = Disassemble().InstructionSource(inst);
     auto& diag = AddError(src) << inst->FriendlyName() << ": ";
 
     if (!block_stack_.IsEmpty()) {
@@ -494,7 +573,7 @@ diag::Diagnostic& Validator::AddError(const Instruction* inst) {
 diag::Diagnostic& Validator::AddError(const Instruction* inst, size_t idx) {
     diagnostics_.ReserveAdditional(2);  // Ensure diagnostics don't resize alive after AddNote()
     auto src =
-        Disassembly().OperandSource(Disassembly::IndexedValue{inst, static_cast<uint32_t>(idx)});
+        Disassemble().OperandSource(Disassembler::IndexedValue{inst, static_cast<uint32_t>(idx)});
     auto& diag = AddError(src) << inst->FriendlyName() << ": ";
 
     if (!block_stack_.IsEmpty()) {
@@ -506,7 +585,7 @@ diag::Diagnostic& Validator::AddError(const Instruction* inst, size_t idx) {
 diag::Diagnostic& Validator::AddResultError(const Instruction* inst, size_t idx) {
     diagnostics_.ReserveAdditional(2);  // Ensure diagnostics don't resize alive after AddNote()
     auto src =
-        Disassembly().ResultSource(Disassembly::IndexedValue{inst, static_cast<uint32_t>(idx)});
+        Disassemble().ResultSource(Disassembler::IndexedValue{inst, static_cast<uint32_t>(idx)});
     auto& diag = AddError(src) << inst->FriendlyName() << ": ";
 
     if (!block_stack_.IsEmpty()) {
@@ -516,95 +595,139 @@ diag::Diagnostic& Validator::AddResultError(const Instruction* inst, size_t idx)
 }
 
 diag::Diagnostic& Validator::AddError(const Block* blk) {
-    auto src = Disassembly().BlockSource(blk);
+    auto src = Disassemble().BlockSource(blk);
     return AddError(src);
 }
 
 diag::Diagnostic& Validator::AddError(const BlockParam* param) {
-    auto src = Disassembly().BlockParamSource(param);
+    auto src = Disassemble().BlockParamSource(param);
     return AddError(src);
 }
 
 diag::Diagnostic& Validator::AddError(const Function* func) {
-    auto src = Disassembly().FunctionSource(func);
+    auto src = Disassemble().FunctionSource(func);
     return AddError(src);
 }
 
 diag::Diagnostic& Validator::AddError(const FunctionParam* param) {
-    auto src = Disassembly().FunctionParamSource(param);
+    auto src = Disassemble().FunctionParamSource(param);
     return AddError(src);
 }
 
 diag::Diagnostic& Validator::AddNote(const Instruction* inst) {
-    auto src = Disassembly().InstructionSource(inst);
+    auto src = Disassemble().InstructionSource(inst);
     return AddNote(src);
 }
 
 diag::Diagnostic& Validator::AddNote(const Function* func) {
-    auto src = Disassembly().FunctionSource(func);
+    auto src = Disassemble().FunctionSource(func);
     return AddNote(src);
 }
 
 diag::Diagnostic& Validator::AddOperandNote(const Instruction* inst, size_t idx) {
     auto src =
-        Disassembly().OperandSource(Disassembly::IndexedValue{inst, static_cast<uint32_t>(idx)});
+        Disassemble().OperandSource(Disassembler::IndexedValue{inst, static_cast<uint32_t>(idx)});
     return AddNote(src);
 }
 
 diag::Diagnostic& Validator::AddResultNote(const Instruction* inst, size_t idx) {
     auto src =
-        Disassembly().ResultSource(Disassembly::IndexedValue{inst, static_cast<uint32_t>(idx)});
+        Disassemble().ResultSource(Disassembler::IndexedValue{inst, static_cast<uint32_t>(idx)});
     return AddNote(src);
 }
 
 diag::Diagnostic& Validator::AddNote(const Block* blk) {
-    auto src = Disassembly().BlockSource(blk);
+    auto src = Disassemble().BlockSource(blk);
     return AddNote(src);
 }
 
 diag::Diagnostic& Validator::AddError(Source src) {
     auto& diag = diagnostics_.AddError(src);
-    diag.owned_file = Disassembly().File();
+    diag.owned_file = Disassemble().File();
     return diag;
 }
 
 diag::Diagnostic& Validator::AddNote(Source src) {
     auto& diag = diagnostics_.AddNote(src);
-    diag.owned_file = Disassembly().File();
+    diag.owned_file = Disassemble().File();
     return diag;
 }
 
-void Validator::AddDeclarationNote(const Value* value) {
+void Validator::AddDeclarationNote(const CastableBase* decl) {
     tint::Switch(
-        value,  //
-        [&](const InstructionResult* res) {
-            if (auto* inst = res->Instruction()) {
-                auto results = inst->Results();
-                for (size_t i = 0; i < results.Length(); i++) {
-                    if (results[i] == value) {
-                        AddResultNote(res->Instruction(), i) << NameOf(value) << " declared here";
-                        return;
-                    }
-                }
+        decl,  //
+        [&](const Block* block) { AddDeclarationNote(block); },
+        [&](const BlockParam* param) { AddDeclarationNote(param); },
+        [&](const Function* fn) { AddDeclarationNote(fn); },
+        [&](const FunctionParam* param) { AddDeclarationNote(param); },
+        [&](const Instruction* inst) { AddDeclarationNote(inst); },
+        [&](const InstructionResult* res) { AddDeclarationNote(res); });
+}
+
+void Validator::AddDeclarationNote(const Block* block) {
+    auto src = Disassemble().BlockSource(block);
+    if (src.file) {
+        AddNote(src) << NameOf(block) << " declared here";
+    }
+}
+
+void Validator::AddDeclarationNote(const BlockParam* param) {
+    auto src = Disassemble().BlockParamSource(param);
+    if (src.file) {
+        AddNote(src) << NameOf(param) << " declared here";
+    }
+}
+
+void Validator::AddDeclarationNote(const Function* fn) {
+    AddNote(fn) << NameOf(fn) << " declared here";
+}
+
+void Validator::AddDeclarationNote(const FunctionParam* param) {
+    auto src = Disassemble().FunctionParamSource(param);
+    if (src.file) {
+        AddNote(src) << NameOf(param) << " declared here";
+    }
+}
+
+void Validator::AddDeclarationNote(const Instruction* inst) {
+    auto src = Disassemble().InstructionSource(inst);
+    if (src.file) {
+        AddNote(src) << NameOf(inst) << " declared here";
+    }
+}
+
+void Validator::AddDeclarationNote(const InstructionResult* res) {
+    if (auto* inst = res->Instruction()) {
+        auto results = inst->Results();
+        for (size_t i = 0; i < results.Length(); i++) {
+            if (results[i] == res) {
+                AddResultNote(res->Instruction(), i) << NameOf(res) << " declared here";
+                return;
             }
-        },
-        [&](const FunctionParam* param) {
-            auto src = Disassembly().FunctionParamSource(param);
-            if (src.file) {
-                AddNote(src) << NameOf(value) << " declared here";
-            }
-        },
-        [&](const BlockParam* param) {
-            auto src = Disassembly().BlockParamSource(param);
-            if (src.file) {
-                AddNote(src) << NameOf(value) << " declared here";
-            }
-        },
-        [&](const Function* fn) { AddNote(fn) << NameOf(value) << " declared here"; });
+        }
+    }
+}
+
+StyledText Validator::NameOf(const CastableBase* decl) {
+    return tint::Switch(
+        decl,  //
+        [&](const Value* value) { return NameOf(value); },
+        [&](const Instruction* inst) { return NameOf(inst); },
+        [&](const Block* block) { return NameOf(block); },  //
+        TINT_ICE_ON_NO_MATCH);
 }
 
 StyledText Validator::NameOf(const Value* value) {
-    return Disassembly().NameOf(value);
+    return Disassemble().NameOf(value);
+}
+
+StyledText Validator::NameOf(const Instruction* inst) {
+    return StyledText{} << style::Instruction(inst->FriendlyName());
+}
+
+StyledText Validator::NameOf(const Block* block) {
+    return StyledText{} << style::Instruction(block->Parent()->FriendlyName()) << " block "
+                        << Disassemble().NameOf(block);
 }
 
 void Validator::CheckOperandNotNull(const Instruction* inst, const ir::Value* operand, size_t idx) {
@@ -659,6 +782,11 @@ void Validator::CheckFunction(const Function* func) {
             return;
         }
 
+        if (!param->Type()) {
+            AddError(param) << "function parameter has nullptr type";
+            return;
+        }
+
         // References not allowed on function signatures even with Capability::kAllowRefTypes
         if (HoldsType<type::Reference>(param->Type())) {
             AddError(param) << "references are not permitted as parameter types";
@@ -666,6 +794,13 @@ void Validator::CheckFunction(const Function* func) {
 
         scope_stack_.Add(param);
     }
+
+    if (func->Stage() == Function::PipelineStage::kCompute) {
+        if (TINT_UNLIKELY(!func->WorkgroupSize().has_value())) {
+            AddError(func) << "compute entry point requires workgroup size attribute";
+        }
+    }
+
     if (HoldsType<type::Reference>(func->ReturnType())) {
         AddError(func) << "references are not permitted as return types";
     }
@@ -716,11 +851,6 @@ void Validator::BeginBlock(const Block* blk) {
         if (inst->Block() != blk) {
             AddError(inst) << "block instruction does not have same block as parent";
             AddNote(blk) << "in block";
-            continue;
-        }
-        if (inst->Is<ir::Terminator>() && inst != blk->Terminator()) {
-            AddError(inst) << "block terminator which isn't the final instruction";
-            continue;
         }
     }
 
@@ -847,27 +977,25 @@ void Validator::CheckLet(const Let* let) {
 
 void Validator::CheckCall(const Call* call) {
     tint::Switch(
-        call,                                                //
-        [&](const Bitcast*) {},                              //
-        [&](const BuiltinCall* c) { CheckBuiltinCall(c); },  //
-        [&](const Construct*) {},                            //
-        [&](const Convert*) {},                              //
-        [&](const Discard*) {},                              //
-        [&](const UserCall* c) { CheckUserCall(c); },        //
+        call,                                                            //
+        [&](const Bitcast*) {},                                          //
+        [&](const BuiltinCall* c) { CheckBuiltinCall(c); },              //
+        [&](const MemberBuiltinCall* c) { CheckMemberBuiltinCall(c); },  //
+        [&](const Construct* c) { CheckConstruct(c); },                  //
+        [&](const Convert*) {},                                          //
+        [&](const Discard*) {},                                          //
+        [&](const UserCall* c) { CheckUserCall(c); },                    //
         [&](Default) {
             // Validation of custom IR instructions
         });
 }
 
 void Validator::CheckBuiltinCall(const BuiltinCall* call) {
-    auto symbols = SymbolTable::Wrap(mod_.symbols);
-    auto type_mgr = type::Manager::Wrap(mod_.Types());
-
     auto args = Transform<8>(call->Args(), [&](const ir::Value* v) { return v->Type(); });
     intrinsic::Context context{
         call->TableData(),
-        type_mgr,
-        symbols,
+        type_mgr_,
+        symbols_,
     };
 
     auto result = core::intrinsic::LookupFn(context, call->FriendlyName().c_str(), call->FuncId(),
@@ -879,6 +1007,56 @@ void Validator::CheckBuiltinCall(const BuiltinCall* call) {
 
     if (result->return_type != call->Result(0)->Type()) {
         AddError(call) << "call result type does not match builtin return type";
+    }
+}
+
+void Validator::CheckMemberBuiltinCall(const MemberBuiltinCall* call) {
+    auto args = Vector<const type::Type*, 8>({call->Object()->Type()});
+    for (auto* arg : call->Args()) {
+        args.Push(arg->Type());
+    }
+    intrinsic::Context context{
+        call->TableData(),
+        type_mgr_,
+        symbols_,
+    };
+
+    auto result =
+        core::intrinsic::LookupMemberFn(context, call->FriendlyName().c_str(), call->FuncId(),
+                                        Empty, std::move(args), core::EvaluationStage::kRuntime);
+    if (result != Success) {
+        AddError(call) << result.Failure();
+        return;
+    }
+
+    if (result->return_type != call->Result(0)->Type()) {
+        AddError(call) << "member call result type does not match builtin return type";
+    }
+}
+
+void Validator::CheckConstruct(const Construct* construct) {
+    auto args = construct->Args();
+    if (args.IsEmpty()) {
+        // Zero-value constructors are valid for all constructible types.
+        return;
+    }
+
+    if (auto* str = construct->Result(0)->Type()->As<type::Struct>()) {
+        auto members = str->Members();
+        if (args.Length() != str->Members().Length()) {
+            AddError(construct) << "structure has " << members.Length()
+                                << " members, but construct provides " << args.Length()
+                                << " arguments";
+            return;
+        }
+        for (size_t i = 0; i < args.Length(); i++) {
+            if (args[i] && args[i]->Type() != members[i]->Type()) {
+                AddError(construct, Construct::kArgsOperandOffset + i)
+                    << "structure member " << i << " is of type "
+                    << style::Type(members[i]->Type()->FriendlyName())
+                    << ", but argument is of type " << style::Type(args[i]->Type()->FriendlyName());
+            }
+        }
     }
 }
 
@@ -1015,9 +1193,7 @@ void Validator::CheckAccess(const Access* a) {
 void Validator::CheckBinary(const Binary* b) {
     CheckOperandsNotNull(b, Binary::kLhsOperandOffset, Binary::kRhsOperandOffset);
     if (b->LHS() && b->RHS()) {
-        auto symbols = SymbolTable::Wrap(mod_.symbols);
-        auto type_mgr = type::Manager::Wrap(mod_.Types());
-        intrinsic::Context context{b->TableData(), type_mgr, symbols};
+        intrinsic::Context context{b->TableData(), type_mgr_, symbols_};
 
         auto overload =
             core::intrinsic::LookupBinary(context, b->Op(), b->LHS()->Type(), b->RHS()->Type(),
@@ -1031,7 +1207,7 @@ void Validator::CheckBinary(const Binary* b) {
             if (overload->return_type != result->Type()) {
                 AddError(b) << "result value type " << style::Type(result->Type()->FriendlyName())
                             << " does not match "
-                            << style::Instruction(Disassembly().NameOf(b->Op())) << " result type "
+                            << style::Instruction(Disassemble().NameOf(b->Op())) << " result type "
                             << style::Type(overload->return_type->FriendlyName());
             }
         }
@@ -1041,9 +1217,7 @@ void Validator::CheckBinary(const Binary* b) {
 void Validator::CheckUnary(const Unary* u) {
     CheckOperandNotNull(u, u->Val(), Unary::kValueOperandOffset);
     if (u->Val()) {
-        auto symbols = SymbolTable::Wrap(mod_.symbols);
-        auto type_mgr = type::Manager::Wrap(mod_.Types());
-        intrinsic::Context context{u->TableData(), type_mgr, symbols};
+        intrinsic::Context context{u->TableData(), type_mgr_, symbols_};
 
         auto overload = core::intrinsic::LookupUnary(context, u->Op(), u->Val()->Type(),
                                                      core::EvaluationStage::kRuntime);
@@ -1056,7 +1230,7 @@ void Validator::CheckUnary(const Unary* u) {
             if (overload->return_type != result->Type()) {
                 AddError(u) << "result value type " << style::Type(result->Type()->FriendlyName())
                             << " does not match "
-                            << style::Instruction(Disassembly().NameOf(u->Op())) << " result type "
+                            << style::Instruction(Disassemble().NameOf(u->Op())) << " result type "
                             << style::Type(overload->return_type->FriendlyName());
             }
         }
@@ -1107,11 +1281,23 @@ void Validator::CheckLoop(const Loop* l) {
         });
     }
 
-    tasks_.Push([this, l] { BeginBlock(l->Body()); });
+    tasks_.Push([this, l] {
+        CheckLoopBody(l);
+        BeginBlock(l->Body());
+    });
     if (!l->Initializer()->IsEmpty()) {
         tasks_.Push([this, l] { BeginBlock(l->Initializer()); });
     }
     tasks_.Push([this, l] { control_stack_.Push(l); });
+}
+
+void Validator::CheckLoopBody(const Loop* loop) {
+    // If the body block has parameters, there must be an initializer block.
+    if (!loop->Body()->Params().IsEmpty()) {
+        if (!loop->HasInitializer()) {
+            AddError(loop) << "loop with body block parameters must have an initializer";
+        }
+    }
 }
 
 void Validator::CheckLoopContinuing(const Loop* loop) {
@@ -1150,10 +1336,27 @@ void Validator::CheckLoopContinuing(const Loop* loop) {
 }
 
 void Validator::CheckSwitch(const Switch* s) {
+    CheckOperandNotNull(s, s->Condition(), If::kConditionOperandOffset);
+
+    if (s->Condition() && !s->Condition()->Type()->is_integer_scalar()) {
+        AddError(s, Switch::kConditionOperandOffset) << "condition type must be an integer scalar";
+    }
+
     tasks_.Push([this] { control_stack_.Pop(); });
 
+    bool found_default = false;
     for (auto& cse : s->Cases()) {
         QueueBlock(cse.block);
+
+        for (const auto& sel : cse.selectors) {
+            if (sel.IsDefault()) {
+                found_default = true;
+            }
+        }
+    }
+
+    if (!found_default) {
+        AddError(s) << "missing default case for switch";
     }
 
     tasks_.Push([this, s] { control_stack_.Push(s); });
@@ -1165,7 +1368,7 @@ void Validator::CheckTerminator(const Terminator* b) {
 
     tint::Switch(
         b,                                                           //
-        [&](const ir::BreakIf*) {},                                  //
+        [&](const ir::BreakIf* i) { CheckBreakIf(i); },              //
         [&](const ir::Continue* c) { CheckContinue(c); },            //
         [&](const ir::Exit* e) { CheckExit(e); },                    //
         [&](const ir::NextIteration* n) { CheckNextIteration(n); },  //
@@ -1173,6 +1376,32 @@ void Validator::CheckTerminator(const Terminator* b) {
         [&](const ir::TerminateInvocation*) {},                      //
         [&](const ir::Unreachable*) {},                              //
         [&](Default) { AddError(b) << "missing validation"; });
+
+    if (b->next) {
+        AddError(b) << "must be the last instruction in the block";
+    }
+}
+
+void Validator::CheckBreakIf(const BreakIf* b) {
+    auto* loop = b->Loop();
+    if (loop == nullptr) {
+        AddError(b) << "has no associated loop";
+        return;
+    }
+
+    if (loop->Continuing() != b->Block()) {
+        AddError(b) << "must only be called directly from loop continuing";
+    }
+
+    auto next_iter_values = b->NextIterValues();
+    if (auto* body = loop->Body()) {
+        CheckOperandsMatchTarget(b, b->ArgsOperandOffset(), next_iter_values.Length(), body,
+                                 body->Params());
+    }
+
+    auto exit_values = b->ExitValues();
+    CheckOperandsMatchTarget(b, b->ArgsOperandOffset() + next_iter_values.Length(),
+                             exit_values.Length(), loop, loop->Results());
 }
 
 void Validator::CheckContinue(const Continue* c) {
@@ -1189,6 +1418,11 @@ void Validator::CheckContinue(const Continue* c) {
         }
     }
 
+    if (auto* cont = loop->Continuing()) {
+        CheckOperandsMatchTarget(c, Continue::kArgsOperandOffset, c->Args().Length(), cont,
+                                 cont->Params());
+    }
+
     first_continues_.Add(loop, c);
 }
 
@@ -1203,24 +1437,9 @@ void Validator::CheckExit(const Exit* e) {
         return;
     }
 
-    auto results = e->ControlInstruction()->Results();
     auto args = e->Args();
-    if (results.Length() != args.Length()) {
-        AddError(e) << ("args count (") << args.Length()
-                    << ") does not match control instruction result count (" << results.Length()
-                    << ")";
-        AddNote(e->ControlInstruction()) << "control instruction";
-        return;
-    }
-
-    for (size_t i = 0; i < results.Length(); ++i) {
-        if (results[i] && args[i] && results[i]->Type() != args[i]->Type()) {
-            AddError(e, i) << "argument type " << style::Type(results[i]->Type()->FriendlyName())
-                           << " does not match control instruction type "
-                           << style::Type(args[i]->Type()->FriendlyName());
-            AddNote(e->ControlInstruction()) << "control instruction";
-        }
-    }
+    CheckOperandsMatchTarget(e, e->ArgsOperandOffset(), args.Length(), e->ControlInstruction(),
+                             e->ControlInstruction()->Results());
 
     tint::Switch(
         e,                                                     //
@@ -1242,6 +1461,11 @@ void Validator::CheckNextIteration(const NextIteration* n) {
         } else {
             AddError(n) << "called outside of associated loop";
         }
+    }
+
+    if (auto* body = loop->Body()) {
+        CheckOperandsMatchTarget(n, NextIteration::kArgsOperandOffset, n->Args().Length(), body,
+                                 body->Params());
     }
 }
 
@@ -1348,8 +1572,7 @@ void Validator::CheckStore(const Store* s) {
         if (auto* to = s->To()) {
             auto* mv = to->Type()->As<core::type::MemoryView>();
             if (!mv) {
-                AddError(s, Store::kFromOperandOffset)
-                    << "store target operand is not a memory view";
+                AddError(s, Store::kToOperandOffset) << "store target operand is not a memory view";
                 return;
             }
             auto* value_type = from->Type();
@@ -1396,6 +1619,37 @@ void Validator::CheckStoreVectorElement(const StoreVectorElement* s) {
     }
 }
 
+void Validator::CheckOperandsMatchTarget(const Instruction* source_inst,
+                                         size_t source_operand_offset,
+                                         size_t source_operand_count,
+                                         const CastableBase* target,
+                                         VectorRef<const Value*> target_values) {
+    if (source_operand_count != target_values.Length()) {
+        auto values = [&](size_t n) { return n == 1 ? " value" : " values"; };
+        AddError(source_inst) << "provides " << source_operand_count << values(source_operand_count)
+                              << " but " << NameOf(target) << " expects " << target_values.Length()
+                              << values(target_values.Length());
+        AddDeclarationNote(target);
+    }
+    size_t count = std::min(source_operand_count, target_values.Length());
+    for (size_t i = 0; i < count; i++) {
+        auto* source_value = source_inst->Operand(source_operand_offset + i);
+        auto* target_value = target_values[i];
+        if (!source_value || !target_value) {
+            continue;  // Caller should be checking operands are not null
+        }
+        auto* source_type = source_value->Type();
+        auto* target_type = target_value->Type();
+        if (source_type != target_type) {
+            AddError(source_inst, source_operand_offset + i)
+                << "operand with type " << style::Type(source_type->FriendlyName())
+                << " does not match " << NameOf(target) << " target type "
+                << style::Type(target_type->FriendlyName());
+            AddDeclarationNote(target_value);
+        }
+    }
+}
+
 const core::type::Type* Validator::GetVectorPtrElementType(const Instruction* inst, size_t idx) {
     auto* operand = inst->Operands()[idx];
     if (TINT_UNLIKELY(!operand)) {
@@ -1432,10 +1686,10 @@ Result<SuccessType> ValidateAndDumpIfNeeded([[maybe_unused]] const Module& ir,
                                             [[maybe_unused]] Capabilities capabilities) {
 #if TINT_DUMP_IR_WHEN_VALIDATING
     auto printer = StyledTextPrinter::Create(stdout);
-    std::cout << "=========================================================" << std::endl;
-    std::cout << "== IR dump before " << msg << ":" << std::endl;
-    std::cout << "=========================================================" << std::endl;
-    printer->Print(Disassemble(ir).Text());
+    std::cout << "=========================================================\n";
+    std::cout << "== IR dump before " << msg << ":\n";
+    std::cout << "=========================================================\n";
+    printer->Print(Disassembler(ir).Text());
 #endif
 
 #ifndef NDEBUG

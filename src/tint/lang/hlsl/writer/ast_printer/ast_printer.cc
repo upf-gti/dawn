@@ -224,10 +224,10 @@ SanitizedResult Sanitize(const Program& in, const Options& options) {
         data.Add<ast::transform::Robustness::Config>(config);
     }
 
-    ExternalTextureOptions external_texture_options{};
+    tint::transform::multiplanar::BindingsMap multiplanar_map{};
     RemapperData remapper_data{};
     ArrayLengthFromUniformOptions array_length_from_uniform_options{};
-    PopulateBindingRelatedOptions(options, remapper_data, external_texture_options,
+    PopulateBindingRelatedOptions(options, remapper_data, multiplanar_map,
                                   array_length_from_uniform_options);
 
     manager.Add<ast::transform::BindingRemapper>();
@@ -239,8 +239,8 @@ SanitizedResult Sanitize(const Program& in, const Options& options) {
 
     // Note: it is more efficient for MultiplanarExternalTexture to come after Robustness
     // MultiplanarExternalTexture must come after BindingRemapper
-    data.Add<ast::transform::MultiplanarExternalTexture::NewBindingPoints>(
-        external_texture_options.bindings_map, /* may_collide */ true);
+    data.Add<ast::transform::MultiplanarExternalTexture::NewBindingPoints>(multiplanar_map,
+                                                                           /* may_collide */ true);
     manager.Add<ast::transform::MultiplanarExternalTexture>();
 
     {  // Builtin polyfills
@@ -285,10 +285,10 @@ SanitizedResult Sanitize(const Program& in, const Options& options) {
 
     {
         PixelLocal::Config cfg;
-        for (auto it : options.pixel_local_options.attachments) {
+        for (auto it : options.pixel_local.attachments) {
             cfg.pls_member_to_rov_reg.Add(it.first, it.second);
         }
-        for (auto it : options.pixel_local_options.attachment_formats) {
+        for (auto it : options.pixel_local.attachment_formats) {
             core::TexelFormat format = core::TexelFormat::kUndefined;
             switch (it.second) {
                 case PixelLocalOptions::TexelFormat::kR32Sint:
@@ -305,7 +305,7 @@ SanitizedResult Sanitize(const Program& in, const Options& options) {
             }
             cfg.pls_member_to_rov_format.Add(it.first, format);
         }
-        cfg.rov_group_index = options.pixel_local_options.pixel_local_group_index;
+        cfg.rov_group_index = options.pixel_local.group_index;
         data.Add<PixelLocal::Config>(cfg);
         manager.Add<PixelLocal>();
     }
@@ -396,9 +396,11 @@ bool ASTPrinter::Generate() {
                 wgsl::Extension::kChromiumExperimentalPixelLocal,
                 wgsl::Extension::kChromiumExperimentalPushConstant,
                 wgsl::Extension::kChromiumExperimentalSubgroups,
-                wgsl::Extension::kChromiumInternalDualSourceBlending,
                 wgsl::Extension::kChromiumInternalGraphite,
                 wgsl::Extension::kF16,
+                wgsl::Extension::kDualSourceBlending,
+                wgsl::Extension::kSubgroups,
+                wgsl::Extension::kSubgroupsF16,
             })) {
         return false;
     }
@@ -2366,8 +2368,7 @@ bool ASTPrinter::EmitQuantizeToF16Call(StringStream& out,
     if (auto* vec = builtin->ReturnType()->As<core::type::Vector>()) {
         width = std::to_string(vec->Width());
     }
-    out << "f16tof32(f32tof16"
-        << "(";
+    out << "f16tof32(f32tof16(";
     if (!EmitExpression(out, expr->args[0])) {
         return false;
     }
@@ -3602,7 +3603,7 @@ bool ASTPrinter::EmitEntryPointFunction(const ast::Function* func) {
                 }
                 out << std::to_string(wgsize[i].value());
             }
-            out << ")]" << std::endl;
+            out << ")]\n";
         }
 
         if (!EmitTypeAndName(out, func_sem->ReturnType(), core::AddressSpace::kUndefined,

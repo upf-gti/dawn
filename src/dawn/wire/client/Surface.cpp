@@ -65,9 +65,11 @@ WGPUTextureFormat Surface::GetPreferredFormat([[maybe_unused]] WGPUAdapter adapt
     return WGPUTextureFormat_BGRA8Unorm;
 }
 
-void Surface::GetCapabilities(WGPUAdapter adapter, WGPUSurfaceCapabilities* capabilities) const {
+WGPUStatus Surface::GetCapabilities(WGPUAdapter adapter,
+                                    WGPUSurfaceCapabilities* capabilities) const {
     // TODO(dawn:2320): Implement this
     dawn::ErrorLog() << "surface.GetCapabilities not supported yet with dawn_wire.";
+    return WGPUStatus_Error;
 }
 
 void Surface::GetCurrentTexture(WGPUSurfaceTexture* surfaceTexture) {
@@ -75,14 +77,15 @@ void Surface::GetCurrentTexture(WGPUSurfaceTexture* surfaceTexture) {
     dawn::ErrorLog() << "surface.GetCurrentTexture not supported yet with dawn_wire.";
 
     Client* wireClient = GetClient();
-    Texture* texture = wireClient->Make<Texture>(&mTextureDescriptor);
-    surfaceTexture->texture = ToAPI(texture);
+    Ref<Texture> texture = wireClient->Make<Texture>(&mTextureDescriptor);
 
     SurfaceGetCurrentTextureCmd cmd;
     cmd.self = ToAPI(this);
     cmd.selfId = GetWireId();
     // cmd.result = texture->GetWireHandle(); // TODO(dawn:2320): Feed surfaceTexture to cmd
     wireClient->SerializeCommand(cmd);
+
+    surfaceTexture->texture = ReturnToAPI(texture);
 }
 
 }  // namespace dawn::wire::client

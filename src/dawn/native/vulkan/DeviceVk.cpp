@@ -212,9 +212,11 @@ ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescripto
 }
 ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
     const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+    const std::vector<tint::wgsl::Extension>& internalExtensions,
     ShaderModuleParseResult* parseResult,
     OwnedCompilationMessages* compilationMessages) {
-    return ShaderModule::Create(this, descriptor, parseResult, compilationMessages);
+    return ShaderModule::Create(this, descriptor, internalExtensions, parseResult,
+                                compilationMessages);
 }
 ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(Surface* surface,
                                                               SwapChainBase* previousSwapChain,
@@ -238,10 +240,6 @@ void Device::InitializeComputePipelineAsyncImpl(Ref<CreateComputePipelineAsyncEv
 }
 void Device::InitializeRenderPipelineAsyncImpl(Ref<CreateRenderPipelineAsyncEvent> event) {
     event->InitializeAsync();
-}
-ResultOrError<wgpu::TextureUsage> Device::GetSupportedSurfaceUsageImpl(
-    const Surface* surface) const {
-    return SwapChain::GetSupportedSurfaceUsage(this, surface);
 }
 
 ResultOrError<Ref<SharedTextureMemoryBase>> Device::ImportSharedTextureMemoryImpl(
@@ -377,7 +375,7 @@ void Device::EnqueueDeferredDeallocation(DescriptorSetAllocator* allocator) {
 ResultOrError<VulkanDeviceKnobs> Device::CreateDevice(VkPhysicalDevice vkPhysicalDevice) {
     VulkanDeviceKnobs usedKnobs = {};
 
-    // Default to asking for all avilable known extensions.
+    // Default to asking for all available known extensions.
     usedKnobs.extensions = mDeviceInfo.extensions;
 
     // However only request the extensions that haven't been promoted in the device's apiVersion
@@ -683,12 +681,13 @@ MaybeError Device::ImportExternalImage(const ExternalImageDescriptorVk* descript
     DAWN_INVALID_IF(!mExternalSemaphoreService->Supported(),
                     "External semaphore usage not supported");
 
-    DAWN_INVALID_IF(!mExternalMemoryService->SupportsImportMemory(
-                        descriptor->GetType(), VulkanImageFormat(this, textureDescriptor->format),
-                        VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
-                        VulkanImageUsage(usage, GetValidInternalFormat(textureDescriptor->format)),
-                        VK_IMAGE_CREATE_ALIAS_BIT_KHR),
-                    "External memory usage not supported");
+    DAWN_INVALID_IF(
+        !mExternalMemoryService->SupportsImportMemory(
+            descriptor->GetType(), VulkanImageFormat(this, textureDescriptor->format),
+            VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+            VulkanImageUsage(this, usage, GetValidInternalFormat(textureDescriptor->format)),
+            VK_IMAGE_CREATE_ALIAS_BIT_KHR),
+        "External memory usage not supported");
 
     // Import the external image's memory
     external_memory::MemoryImportParams importParams;
@@ -906,6 +905,56 @@ void Device::DestroyImpl() {
     // remaining Vulkan Validation Layer messages that may have been added during destruction or not
     // handled prior to destruction.
     CheckDebugMessagesAfterDestruction();
+}
+
+MaybeError Device::GetAHardwareBufferPropertiesImpl(void* handle,
+                                                    AHardwareBufferProperties* properties) const {
+#if DAWN_PLATFORM_IS(ANDROID)
+    auto* aHardwareBuffer = static_cast<struct AHardwareBuffer*>(handle);
+
+    VkAndroidHardwareBufferPropertiesANDROID bufferProperties = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,
+    };
+
+    // Query the properties to find the appropriate VkFormat and memory type.
+    VkAndroidHardwareBufferFormatPropertiesANDROID bufferFormatProperties;
+    PNextChainBuilder bufferPropertiesChain(&bufferProperties);
+    bufferPropertiesChain.Add(&bufferFormatProperties,
+                              VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID);
+
+    DAWN_TRY(CheckVkSuccess(fn.GetAndroidHardwareBufferPropertiesANDROID(
+                                GetVkDevice(), aHardwareBuffer, &bufferProperties),
+                            "vkGetAndroidHardwareBufferPropertiesANDROID"));
+
+    // Populate the YCbCr info.
+    properties->yCbCrInfo.externalFormat = bufferFormatProperties.externalFormat;
+    properties->yCbCrInfo.vkFormat = bufferFormatProperties.format;
+    properties->yCbCrInfo.vkYCbCrModel = bufferFormatProperties.suggestedYcbcrModel;
+    properties->yCbCrInfo.vkYCbCrRange = bufferFormatProperties.suggestedYcbcrRange;
+    properties->yCbCrInfo.vkComponentSwizzleRed =
+        bufferFormatProperties.samplerYcbcrConversionComponents.r;
+    properties->yCbCrInfo.vkComponentSwizzleGreen =
+        bufferFormatProperties.samplerYcbcrConversionComponents.g;
+    properties->yCbCrInfo.vkComponentSwizzleBlue =
+        bufferFormatProperties.samplerYcbcrConversionComponents.b;
+    properties->yCbCrInfo.vkComponentSwizzleAlpha =
+        bufferFormatProperties.samplerYcbcrConversionComponents.a;
+    properties->yCbCrInfo.vkXChromaOffset = bufferFormatProperties.suggestedXChromaOffset;
+    properties->yCbCrInfo.vkYChromaOffset = bufferFormatProperties.suggestedYChromaOffset;
+
+    uint32_t formatFeatures = bufferFormatProperties.formatFeatures;
+    properties->yCbCrInfo.vkChromaFilter =
+        (formatFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT)
+            ? wgpu::FilterMode::Linear
+            : wgpu::FilterMode::Nearest;
+    properties->yCbCrInfo.forceExplicitReconstruction =
+        formatFeatures &
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_CHROMA_RECONSTRUCTION_EXPLICIT_BIT;
+
+    return {};
+#else
+    return DeviceBase::GetAHardwareBufferPropertiesImpl(handle, properties);
+#endif
 }
 
 uint32_t Device::GetOptimalBytesPerRowAlignment() const {

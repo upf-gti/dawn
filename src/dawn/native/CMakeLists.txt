@@ -28,7 +28,8 @@
 DawnJSONGenerator(
     TARGET "native_utils"
     PRINT_NAME "Dawn native utilities"
-    RESULT_VARIABLE "DAWN_NATIVE_UTILS_GEN_SOURCES"
+    OUTPUT_HEADERS DAWN_NATIVE_UTILS_GEN_HEADERS
+    OUTPUT_SOURCES DAWN_NATIVE_UTILS_GEN_SOURCES
 )
 
 add_library(dawn_native)
@@ -44,6 +45,7 @@ target_sources(dawn_native
     "${DAWN_INCLUDE_DIR}/dawn/native/DawnNative.h"
     "${DAWN_INCLUDE_DIR}/dawn/native/dawn_native_export.h"
   PRIVATE
+    ${DAWN_NATIVE_UTILS_GEN_HEADERS}
     ${DAWN_NATIVE_UTILS_GEN_SOURCES}
     "Adapter.h"
     "Adapter.cpp"
@@ -195,6 +197,8 @@ target_sources(dawn_native
     "RenderEncoderBase.h"
     "RenderPassEncoder.cpp"
     "RenderPassEncoder.h"
+    "RenderPassWorkaroundsHelper.cpp"
+    "RenderPassWorkaroundsHelper.h"
     "RenderPipeline.cpp"
     "RenderPipeline.h"
     "ResourceHeap.h"
@@ -256,12 +260,11 @@ target_link_libraries(dawn_native
             dawn_platform
             dawn_internal_config
             libtint
-            SPIRV-Tools-opt
-            absl_strings
-            absl_str_format_internal
-            absl_flat_hash_map
-            absl_flat_hash_set
-            absl_inlined_vector
+            absl::strings
+            absl::str_format_internal
+            absl::flat_hash_map
+            absl::flat_hash_set
+            absl::inlined_vector
 )
 
 target_include_directories(dawn_native PRIVATE ${DAWN_ABSEIL_DIR})
@@ -336,6 +339,7 @@ if (DAWN_ENABLE_D3D11 OR DAWN_ENABLE_D3D12)
         "d3d/UtilsD3D.h"
         "d3d/d3d_platform.h"
     )
+    target_link_libraries(dawn_native PRIVATE dxguid.lib)
 endif()
 
 if (DAWN_ENABLE_D3D11)
@@ -475,7 +479,6 @@ if (DAWN_ENABLE_D3D12)
         "d3d12/UtilsD3D12.h"
         "d3d12/d3d12_platform.h"
     )
-    target_link_libraries(dawn_native PRIVATE dxguid.lib)
     if (DAWN_USE_BUILT_DXC)
         target_compile_definitions(dawn_native PRIVATE "DAWN_USE_BUILT_DXC")
         target_link_libraries(dawn_native PRIVATE dxcompiler)
@@ -558,23 +561,28 @@ if (DAWN_ENABLE_OPENGL OR DAWN_ENABLE_VULKAN)
         "SpirvValidation.cpp"
         "SpirvValidation.h"
     )
+    target_link_libraries(dawn_native PRIVATE
+        SPIRV-Tools-opt
+    )
 endif()
 
 if (DAWN_ENABLE_OPENGL)
     DawnGenerator(
         SCRIPT "${Dawn_SOURCE_DIR}/generator/opengl_loader_generator.py"
         PRINT_NAME "OpenGL function loader"
-        ARGS "--gl-xml"
+        EXTRA_PARAMETERS "--gl-xml"
              "${Dawn_SOURCE_DIR}/third_party/khronos/OpenGL-Registry/xml/gl.xml"
              "--supported-extensions"
              "${Dawn_SOURCE_DIR}/src/dawn/native/opengl/supported_extensions.json"
-        RESULT_VARIABLE "DAWN_NATIVE_OPENGL_AUTOGEN_SOURCES"
+        OUTPUT_HEADERS DAWN_NATIVE_OPENGL_AUTOGEN_HEADERS
+        OUTPUT_SOURCES DAWN_NATIVE_OPENGL_AUTOGEN_SOURCES
     )
 
     target_sources(dawn_native
       INTERFACE
         "${DAWN_INCLUDE_DIR}/dawn/native/OpenGLBackend.h"
       PRIVATE
+        ${DAWN_NATIVE_OPENGL_AUTOGEN_HEADERS}
         ${DAWN_NATIVE_OPENGL_AUTOGEN_SOURCES}
         "opengl/BackendGL.cpp"
         "opengl/BackendGL.h"
@@ -593,6 +601,8 @@ if (DAWN_ENABLE_OPENGL)
         "opengl/ContextEGL.h"
         "opengl/DeviceGL.cpp"
         "opengl/DeviceGL.h"
+        "opengl/DisplayEGL.cpp"
+        "opengl/DisplayEGL.h"
         "opengl/EGLFunctions.cpp"
         "opengl/EGLFunctions.h"
         "opengl/Forward.h"
@@ -679,6 +689,8 @@ if (DAWN_ENABLE_VULKAN)
         "vulkan/RenderPassCache.h"
         "vulkan/RenderPipelineVk.cpp"
         "vulkan/RenderPipelineVk.h"
+        "vulkan/ResolveTextureLoadingUtilsVk.cpp"
+        "vulkan/ResolveTextureLoadingUtilsVk.h"
         "vulkan/ResourceHeapVk.cpp"
         "vulkan/ResourceHeapVk.h"
         "vulkan/ResourceMemoryAllocatorVk.cpp"
@@ -766,7 +778,7 @@ endif()
 DawnJSONGenerator(
     TARGET "webgpu_dawn_native_proc"
     PRINT_NAME "Dawn native WebGPU procs"
-    RESULT_VARIABLE "WEBGPU_DAWN_NATIVE_PROC_GEN"
+    OUTPUT_SOURCES WEBGPU_DAWN_NATIVE_PROC_GEN_SOURCES
 )
 
 # A convenience target that bundles dawn_native and procs calling it directly so that
@@ -783,7 +795,10 @@ target_compile_definitions(webgpu_dawn PRIVATE "WGPU_IMPLEMENTATION")
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(webgpu_dawn PRIVATE "WGPU_SHARED_LIBRARY")
 endif()
-target_sources(webgpu_dawn PRIVATE ${WEBGPU_DAWN_NATIVE_PROC_GEN})
+target_sources(webgpu_dawn
+    PRIVATE
+        ${WEBGPU_DAWN_NATIVE_PROC_GEN_SOURCES}
+)
 
 install_if_enabled(dawn_native)
 install_if_enabled(webgpu_dawn)

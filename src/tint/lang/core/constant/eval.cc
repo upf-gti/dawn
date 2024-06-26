@@ -195,16 +195,15 @@ std::string OverflowErrorMessage(NumberT lhs, const char* op, NumberT rhs) {
 template <typename VALUE_TY>
 std::string OverflowErrorMessage(VALUE_TY value, std::string_view target_ty) {
     StringStream ss;
-    ss << "value " << value << " cannot be represented as "
-       << "'" << target_ty << "'";
+    ss << "value " << value << " cannot be represented as " << "'" << target_ty << "'";
     return ss.str();
 }
 
 template <typename NumberT>
 std::string OverflowExpErrorMessage(std::string_view base, NumberT exp) {
     StringStream ss;
-    ss << base << "^" << exp << " cannot be represented as "
-       << "'" << FriendlyName<NumberT>() << "'";
+    ss << base << "^" << exp << " cannot be represented as " << "'" << FriendlyName<NumberT>()
+       << "'";
     return ss.str();
 }
 
@@ -359,7 +358,7 @@ const Value* ConvertInternal(const Value* root_value,
         if (auto* build = std::get_if<ActionBuildSplat>(&next)) {
             TINT_ASSERT(value_stack.Length() >= 1);
             auto* el = value_stack.Pop();
-            value_stack.Push(ctx.mgr.Splat(build->type, el, build->count));
+            value_stack.Push(ctx.mgr.Splat(build->type, el));
             continue;
         }
 
@@ -1331,7 +1330,7 @@ Eval::Result Eval::VecSplat(const core::type::Type* ty,
                             VectorRef<const Value*> args,
                             const Source&) {
     if (auto* arg = args[0]) {
-        return mgr.Splat(ty, arg, static_cast<const core::type::Vector*>(ty)->Width());
+        return mgr.Splat(ty, arg);
     }
     return nullptr;
 }
@@ -1395,7 +1394,7 @@ Eval::Result Eval::Index(const Value* obj_val,
                          const core::type::Type* obj_ty,
                          const Value* idx_val,
                          const Source& idx_source) {
-    auto el = obj_ty->UnwrapRef()->Elements();
+    auto el = obj_ty->UnwrapPtrOrRef()->Elements();
 
     AInt idx = idx_val->ValueAs<AInt>();
     if (idx < 0 || (el.count > 0 && idx >= el.count)) {

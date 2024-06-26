@@ -117,6 +117,8 @@ void SharedTextureMemoryTests::SetUp() {
     DawnTestWithParams<SharedTextureMemoryTestParams>::SetUp();
     DAWN_TEST_UNSUPPORTED_IF(
         !SupportsFeatures(GetParam().mBackend->RequiredFeatures(GetAdapter().Get())));
+    // TODO(crbug.com/342213634): Crashes on ChromeOS volteer devices.
+    DAWN_SUPPRESS_TEST_IF(IsChromeOS() && IsVulkan() && IsIntel() && IsBackendValidationEnabled());
     GetParam().mBackend->SetUp();
 }
 
@@ -833,7 +835,7 @@ TEST_P(SharedTextureMemoryTests, ImportSharedFenceNoChain) {
 
     // Expect that exporting the fence info writes Undefined, and generates an error.
     ASSERT_DEVICE_ERROR(fence.ExportInfo(&exportInfo));
-    EXPECT_EQ(exportInfo.type, wgpu::SharedFenceType::Undefined);
+    EXPECT_EQ(exportInfo.type, wgpu::SharedFenceType(0));
 }
 
 // Test importing a shared texture memory when the device is destroyed
@@ -991,11 +993,12 @@ TEST_P(SharedTextureMemoryTests, TextureUsages) {
         // texture (the relevant flag is currently always passed in the test
         // context). Add tests where the D3D/Vulkan texture is not created with the
         // relevant flag.
+#if !DAWN_PLATFORM_IS(ANDROID)
         if (isSinglePlanar && utils::TextureFormatSupportsStorageTexture(properties.format, device,
                                                                          IsCompatibilityMode())) {
             expectedUsage |= wgpu::TextureUsage::StorageBinding;
         }
-
+#endif
         EXPECT_EQ(properties.usage, expectedUsage) << properties.format;
     }
 }

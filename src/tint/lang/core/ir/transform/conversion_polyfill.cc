@@ -206,8 +206,8 @@ struct State {
     /// @param match the type to match the component count of
     /// @returns a value with the same number of vector components as @p match
     ir::Constant* MatchWidth(ir::Constant* element, const core::type::Type* match) {
-        if (auto* vec = match->As<core::type::Vector>()) {
-            return b.Splat(MatchWidth(element->Type(), match), element, vec->Width());
+        if (match->Is<core::type::Vector>()) {
+            return b.Splat(MatchWidth(element->Type(), match), element);
         }
         return element;
     }

@@ -32,6 +32,7 @@
 #include "spirv/unified1/GLSL.std.450.h"
 #include "spirv/unified1/spirv.h"
 
+#include "src/tint/lang/core/access.h"
 #include "src/tint/lang/core/address_space.h"
 #include "src/tint/lang/core/builtin_value.h"
 #include "src/tint/lang/core/constant/scalar.h"
@@ -81,6 +82,7 @@
 #include "src/tint/lang/core/type/f16.h"
 #include "src/tint/lang/core/type/f32.h"
 #include "src/tint/lang/core/type/i32.h"
+#include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/matrix.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/pointer.h"
@@ -155,6 +157,10 @@ const core::type::Type* DedupType(const core::type::Type* ty, core::type::Manage
         },
         [&](const core::type::DepthMultisampledTexture* depth) {
             return types.Get<core::type::MultisampledTexture>(depth->dim(), types.f32());
+        },
+        [&](const core::type::StorageTexture* st) -> const core::type::Type* {
+            return types.Get<core::type::StorageTexture>(st->dim(), st->texel_format(),
+                                                         core::Access::kRead, st->type());
         },
 
         // Both sampler types are the same in SPIR-V.
@@ -611,7 +617,8 @@ class Printer {
             texture,  //
             [&](const core::type::SampledTexture* t) { return Type(t->type()); },
             [&](const core::type::MultisampledTexture* t) { return Type(t->type()); },
-            [&](const core::type::StorageTexture* t) { return Type(t->type()); },  //
+            [&](const core::type::StorageTexture* t) { return Type(t->type()); },
+            [&](const core::type::InputAttachment* t) { return Type(t->type()); },  //
             TINT_ICE_ON_NO_MATCH);
 
         uint32_t dim = SpvDimMax;
@@ -630,7 +637,12 @@ class Printer {
                 break;
             }
             case core::type::TextureDimension::k2d: {
-                dim = SpvDim2D;
+                if (texture->Is<core::type::InputAttachment>()) {
+                    module_.PushCapability(SpvCapabilityInputAttachment);
+                    dim = SpvDimSubpassData;
+                } else {
+                    dim = SpvDim2D;
+                }
                 break;
             }
             case core::type::TextureDimension::k2dArray: {
@@ -1791,8 +1803,8 @@ class Printer {
 
             if (auto* vec = res_ty->As<core::type::Vector>()) {
                 // Splat the scalars into vectors.
-                one = b_.Splat(vec, one, vec->Width());
-                zero = b_.Splat(vec, zero, vec->Width());
+                one = b_.Splat(vec, one);
+                zero = b_.Splat(vec, zero);
             }
 
             op = spv::Op::OpSelect;
@@ -1971,6 +1983,9 @@ class Printer {
                     op = spv::Op::OpSNegate;
                 }
                 break;
+            case core::UnaryOp::kNot:
+                op = spv::Op::OpLogicalNot;
+                break;
             default:
                 TINT_UNIMPLEMENTED() << unary->Op();
         }
@@ -2118,6 +2133,14 @@ class Printer {
                                           {id, U32Operand(SpvDecorationNonReadable)});
                     }
                 }
+
+                auto iidx = var->InputAttachmentIndex();
+                if (iidx) {
+                    TINT_ASSERT(store_ty->Is<core::type::InputAttachment>());
+                    module_.PushAnnot(
+                        spv::Op::OpDecorate,
+                        {id, U32Operand(SpvDecorationInputAttachmentIndex), iidx.value()});
+                }
                 break;
             }
             case core::AddressSpace::kWorkgroup: {
@@ -2171,11 +2194,13 @@ class Printer {
             branches.Sort();  // Sort the branches by label to ensure deterministic output
 
             // Also add phi nodes from implicit exit blocks.
-            inst->ForeachBlock([&](core::ir::Block* block) {
-                if (block->IsEmpty()) {
-                    branches.Push(Branch{Label(block), nullptr});
-                }
-            });
+            if (inst->Is<core::ir::If>()) {
+                inst->ForeachBlock([&](core::ir::Block* block) {
+                    if (block->IsEmpty()) {
+                        branches.Push(Branch{Label(block), nullptr});
+                    }
+                });
+            }
 
             OperandList ops{Type(ty), Value(result)};
             for (auto& branch : branches) {

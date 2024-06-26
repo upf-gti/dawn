@@ -225,6 +225,10 @@ async function runCtsTest(queryString) {
 
   const name = testcase.query.toString();
 
+  // Logs look like: " - EXPECTATION FAILED: subcase: foobar=2;foo=a;bar=2\n...."
+  // or "EXCEPTION: Name!: Message!\nsubcase: fail = true\n..."
+  const subcaseLogPrefixRegex = /\s?subcase: .*$/m;
+
   const wpt_fn = async () => {
     sendMessageTestStarted();
     const [rec, res] = log.record(name);
@@ -238,7 +242,26 @@ async function runCtsTest(queryString) {
     endHeartbeatScope();
 
     sendMessageTestStatus(res.status, res.timems);
-    sendMessageTestLog(res.logs);
+    if (res.status === 'pass') {
+      // Send an "OK" log. Passing tests don't report logs to Telemetry.
+      sendMessageTestLogOK();
+    } else {
+      // Log all the logs to the console so they are visible.
+      if (res.logs) {
+        // Log the query string first as logs from multiple browsers may be interleaved and prefixed
+        // with their process id. Logging the test name lets us see what process a test ran in.
+        console.log(`Logs from ${queryString}`);
+        for (const l of res.logs) {
+          console.log(l);
+        }
+      }
+      // Report non-INFO logs to the harness so they don't show up in the LUCI failure reason.
+      // Strip out subcase information for better clustering.
+      sendMessageTestLog((res.logs || [])
+        .filter(l => l.name !== 'INFO')
+        .map(prettyPrintLog)
+        .map(l => l.replace(subcaseLogPrefixRegex, '')));
+    }
     sendMessageTestFinished();
   };
   await wpt_fn();
@@ -284,8 +307,12 @@ function sendMessageTestStatus(status, jsDurationMs) {
   }));
 }
 
+function sendMessageTestLogOK() {
+  socket.send('{"type":"TEST_LOG","log":"OK"}');
+}
+
 function sendMessageTestLog(logs) {
-  splitLogsForPayload((logs ?? []).map(prettyPrintLog).join('\n\n'))
+  splitLogsForPayload(logs.join('\n\n'))
     .forEach((piece) => {
       socket.send(JSON.stringify({
         'type': 'TEST_LOG',

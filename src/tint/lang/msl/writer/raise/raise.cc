@@ -29,6 +29,8 @@
 
 #include <utility>
 
+#include "src/tint/api/common/binding_point.h"
+#include "src/tint/lang/core/ir/transform/array_length_from_uniform.h"
 #include "src/tint/lang/core/ir/transform/binary_polyfill.h"
 #include "src/tint/lang/core/ir/transform/binding_remapper.h"
 #include "src/tint/lang/core/ir/transform/builtin_polyfill.h"
@@ -36,6 +38,8 @@
 #include "src/tint/lang/core/ir/transform/demote_to_helper.h"
 #include "src/tint/lang/core/ir/transform/multiplanar_external_texture.h"
 #include "src/tint/lang/core/ir/transform/preserve_padding.h"
+#include "src/tint/lang/core/ir/transform/remove_terminator_args.h"
+#include "src/tint/lang/core/ir/transform/rename_conflicts.h"
 #include "src/tint/lang/core/ir/transform/robustness.h"
 #include "src/tint/lang/core/ir/transform/value_to_let.h"
 #include "src/tint/lang/core/ir/transform/vectorize_scalar_matrix_constructors.h"
@@ -43,22 +47,25 @@
 #include "src/tint/lang/msl/writer/common/option_helpers.h"
 #include "src/tint/lang/msl/writer/raise/builtin_polyfill.h"
 #include "src/tint/lang/msl/writer/raise/module_scope_vars.h"
+#include "src/tint/lang/msl/writer/raise/shader_io.h"
 
 namespace tint::msl::writer {
 
-Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
+Result<RaiseResult> Raise(core::ir::Module& module, const Options& options) {
 #define RUN_TRANSFORM(name, ...)                   \
     do {                                           \
         auto result = name(module, ##__VA_ARGS__); \
         if (result != Success) {                   \
-            return result;                         \
+            return result.Failure();               \
         }                                          \
     } while (false)
 
-    ExternalTextureOptions external_texture_options{};
+    RaiseResult raise_result;
+
+    tint::transform::multiplanar::BindingsMap multiplanar_map{};
     RemapperData remapper_data{};
     ArrayLengthFromUniformOptions array_length_from_uniform_options{};
-    PopulateBindingRelatedOptions(options, remapper_data, external_texture_options,
+    PopulateBindingRelatedOptions(options, remapper_data, multiplanar_map,
                                   array_length_from_uniform_options);
     RUN_TRANSFORM(core::ir::transform::BindingRemapper, remapper_data);
 
@@ -72,10 +79,12 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
     {
         core::ir::transform::BuiltinPolyfillConfig core_polyfills{};
         core_polyfills.clamp_int = true;
+        core_polyfills.degrees = true;
         core_polyfills.extract_bits = core::ir::transform::BuiltinPolyfillLevel::kClampOrRangeCheck;
         core_polyfills.first_leading_bit = true;
         core_polyfills.first_trailing_bit = true;
         core_polyfills.insert_bits = core::ir::transform::BuiltinPolyfillLevel::kClampOrRangeCheck;
+        core_polyfills.radians = true;
         core_polyfills.texture_sample_base_clamp_to_edge_2d_f32 = true;
         RUN_TRANSFORM(core::ir::transform::BuiltinPolyfill, core_polyfills);
     }
@@ -92,7 +101,16 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
         RUN_TRANSFORM(core::ir::transform::Robustness, config);
     }
 
-    RUN_TRANSFORM(core::ir::transform::MultiplanarExternalTexture, external_texture_options);
+    RUN_TRANSFORM(core::ir::transform::MultiplanarExternalTexture, multiplanar_map);
+
+    auto array_length_from_uniform_result = core::ir::transform::ArrayLengthFromUniform(
+        module, BindingPoint{0u, array_length_from_uniform_options.ubo_binding},
+        array_length_from_uniform_options.bindpoint_to_size_index);
+    if (array_length_from_uniform_result != Success) {
+        return array_length_from_uniform_result.Failure();
+    }
+    raise_result.needs_storage_buffer_sizes =
+        array_length_from_uniform_result->needs_storage_buffer_sizes;
 
     if (!options.disable_workgroup_init) {
         RUN_TRANSFORM(core::ir::transform::ZeroInitWorkgroupMemory);
@@ -104,11 +122,17 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
     // DemoteToHelper must come before any transform that introduces non-core instructions.
     RUN_TRANSFORM(core::ir::transform::DemoteToHelper);
 
+    RUN_TRANSFORM(raise::ShaderIO, raise::ShaderIOConfig{options.emit_vertex_point_size});
     RUN_TRANSFORM(raise::ModuleScopeVars);
-    RUN_TRANSFORM(core::ir::transform::ValueToLet);
     RUN_TRANSFORM(raise::BuiltinPolyfill);
 
-    return Success;
+    // These transforms need to be run last as various transforms introduce terminator arguments,
+    // naming conflicts, and expressions that need to be explicitly not inlined.
+    RUN_TRANSFORM(core::ir::transform::RemoveTerminatorArgs);
+    RUN_TRANSFORM(core::ir::transform::RenameConflicts);
+    RUN_TRANSFORM(core::ir::transform::ValueToLet);
+
+    return raise_result;
 }
 
 }  // namespace tint::msl::writer

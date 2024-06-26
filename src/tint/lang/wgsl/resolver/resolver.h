@@ -40,7 +40,9 @@
 #include "src/tint/lang/core/constant/eval.h"
 #include "src/tint/lang/core/constant/value.h"
 #include "src/tint/lang/core/intrinsic/table.h"
+#include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/wgsl/common/allowed_features.h"
+#include "src/tint/lang/wgsl/common/validation_mode.h"
 #include "src/tint/lang/wgsl/intrinsic/dialect.h"
 #include "src/tint/lang/wgsl/program/program_builder.h"
 #include "src/tint/lang/wgsl/resolver/dependency_graph.h"
@@ -99,7 +101,10 @@ class Resolver {
     /// Constructor
     /// @param builder the program builder
     /// @param allowed_features the extensions and features that are allowed to be used
-    explicit Resolver(ProgramBuilder* builder, const wgsl::AllowedFeatures& allowed_features);
+    /// @param mode the validation mode to use
+    Resolver(ProgramBuilder* builder,
+             const wgsl::AllowedFeatures& allowed_features,
+             wgsl::ValidationMode mode = wgsl::ValidationMode::kFull);
 
     /// Destructor
     ~Resolver();
@@ -222,6 +227,9 @@ class Resolver {
     /// dimensions @p dim.
     core::type::StorageTexture* StorageTexture(const ast::Identifier* ident,
                                                core::type::TextureDimension dim);
+
+    /// @returns an input attachment resolved from the templated identifier @p ident
+    core::type::InputAttachment* InputAttachment(const ast::Identifier* ident);
 
     /// @returns a packed vec3 resolved from the templated identifier @p ident.
     core::type::Vector* PackedVec3T(const ast::Identifier* ident);
@@ -438,6 +446,11 @@ class Resolver {
     /// Resolves the `@group` attribute @p attr
     /// @returns the group value on success.
     tint::Result<uint32_t> GroupAttribute(const ast::GroupAttribute* attr);
+
+    /// Resolves the `@input_attachment_index` attribute @p attr
+    /// @returns the index value on success.
+    tint::Result<uint32_t> InputAttachmentIndexAttribute(
+        const ast::InputAttachmentIndexAttribute* attr);
 
     /// Resolves the `@workgroup_size` attribute @p attr
     /// @returns the workgroup size on success.
@@ -713,7 +726,7 @@ class Resolver {
     uint32_t current_scoping_depth_ = 0;
     Hashset<TypeAndAddressSpace, 8> valid_type_storage_layouts_;
     Hashmap<const ast::Expression*, const ast::BinaryExpression*, 8> logical_binary_lhs_to_parent_;
-    Hashset<const ast::Expression*, 8> skip_const_eval_;
+    Hashset<const ast::Expression*, 8> not_evaluated_;
     Hashmap<const core::type::Type*, size_t, 8> nest_depth_;
     Hashmap<std::pair<core::intrinsic::Overload, wgsl::BuiltinFn>, sem::BuiltinFn*, 64> builtins_;
     Hashmap<core::intrinsic::Overload, sem::ValueConstructor*, 16> constructors_;

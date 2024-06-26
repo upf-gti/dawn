@@ -1,8 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
+
 struct tint_module_vars_struct {
   device int* s;
 };
+
 template<typename T, size_t N>
 struct tint_array {
   const constant T& operator[](size_t i) const constant { return elements[i]; }
@@ -15,9 +17,8 @@ struct tint_array {
   T elements[N];
 };
 
-
 kernel void tint_symbol(device int* s [[buffer(0)]]) {
-  tint_module_vars_struct const tint_module_vars = {.s=s};
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.s=s};
   int const x = 42;
   tint_array<int, 4> const empty = tint_array<int, 4>{};
   tint_array<int, 4> const nonempty = tint_array<int, 4>{1, 2, 3, 4};

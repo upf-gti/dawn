@@ -364,7 +364,9 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
     const Surface*) const {
     PhysicalDeviceSurfaceCapabilities capabilities;
 
-    // Formats
+    capabilities.usages = wgpu::TextureUsage::RenderAttachment |
+                          wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc |
+                          wgpu::TextureUsage::CopyDst;
 
     capabilities.formats = {
         wgpu::TextureFormat::BGRA8Unorm,
@@ -375,20 +377,15 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
     capabilities.formats.push_back(wgpu::TextureFormat::RGB10A2Unorm);
 #endif  // DAWN_PLATFORM_IS(MACOS)
 
-    // Present Modes
-
     capabilities.presentModes = {
         wgpu::PresentMode::Fifo,
         wgpu::PresentMode::Immediate,
         wgpu::PresentMode::Mailbox,
     };
 
-    // Alpha Modes
-
     capabilities.alphaModes = {
         wgpu::CompositeAlphaMode::Opaque,
         wgpu::CompositeAlphaMode::Premultiplied,
-        wgpu::CompositeAlphaMode::Auto,
     };
 
     return capabilities;
@@ -491,6 +488,16 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     // "metal_use_mock_blit_encoder_for_write_timestamp".
     if (@available(macos 11.0, iOS 14.0, *)) {
         deviceToggles->Default(Toggle::MetalUseMockBlitEncoderForWriteTimestamp, true);
+    }
+
+    // On macOS 15.0+, we can use sampleTimestamps:gpuTimestamp: from MTLDevice to capture CPU and
+    // GPU timestamps to estimate GPU timestamp period at device creation, but this API call will
+    // cause GPU overheating on Intel Iris Plus Graphics 655 due to driver bug. Skip the
+    // timestamp sampling on the specific device as workaround. See https://crbug.com/342701242 for
+    // more details.
+    if (@available(macos 15.0, iOS 14.0, *)) {
+        deviceToggles->Default(Toggle::MetalDisableTimestampPeriodEstimation,
+                               gpu_info::IsIrisPlus655(deviceId));
     }
 
 #if DAWN_PLATFORM_IS(MACOS)

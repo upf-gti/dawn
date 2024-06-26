@@ -1721,12 +1721,8 @@ class MSAARenderToSingleSampledRenderPassDescriptorValidationTest
         mRenderToSingleSampledDesc.implicitSampleCount = kSampleCount;
     }
 
-    WGPUDevice CreateTestDevice(dawn::native::Adapter dawnAdapter,
-                                wgpu::DeviceDescriptor descriptor) override {
-        wgpu::FeatureName requiredFeatures[1] = {wgpu::FeatureName::MSAARenderToSingleSampled};
-        descriptor.requiredFeatures = requiredFeatures;
-        descriptor.requiredFeatureCount = 1;
-        return dawnAdapter.CreateDevice(&descriptor);
+    std::vector<wgpu::FeatureName> GetRequiredFeatures() override {
+        return {wgpu::FeatureName::MSAARenderToSingleSampled};
     }
 
     utils::ComboRenderPassDescriptor CreateMultisampledRenderToSingleSampledRenderPass(
@@ -1861,14 +1857,8 @@ TEST_F(MSAARenderToSingleSampledRenderPassDescriptorValidationTest,
 
 class DawnLoadResolveTextureValidationTest : public MultisampledRenderPassDescriptorValidationTest {
   protected:
-    WGPUDevice CreateTestDevice(dawn::native::Adapter dawnAdapter,
-                                wgpu::DeviceDescriptor descriptor) override {
-        wgpu::FeatureName requiredFeatures[2] = {wgpu::FeatureName::DawnLoadResolveTexture,
-                                                 wgpu::FeatureName::TransientAttachments};
-        descriptor.requiredFeatures = requiredFeatures;
-        descriptor.requiredFeatureCount = 2;
-
-        return dawnAdapter.CreateDevice(&descriptor);
+    std::vector<wgpu::FeatureName> GetRequiredFeatures() override {
+        return {wgpu::FeatureName::DawnLoadResolveTexture, wgpu::FeatureName::TransientAttachments};
     }
 
     // Create a view for a resolve texture that can be used with LoadOp::ExpandResolveTexture.
@@ -1978,7 +1968,8 @@ TEST_F(DawnLoadResolveTextureValidationTest, UnresolvableColorFormatError) {
     renderPass.cColorAttachments[0].view = multisampledTexture.CreateView();
     renderPass.cColorAttachments[0].resolveTarget = resolveTexture.CreateView();
     renderPass.cColorAttachments[0].loadOp = wgpu::LoadOp::ExpandResolveTexture;
-    AssertBeginRenderPassError(&renderPass, testing::HasSubstr("does not support resolve"));
+    AssertBeginRenderPassError(&renderPass,
+                               testing::HasSubstr("does not support being used as resolve target"));
 }
 
 // The LoadOp is NOT currently supported on depth/stencil attachment.

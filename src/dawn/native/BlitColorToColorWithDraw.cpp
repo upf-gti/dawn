@@ -75,7 +75,7 @@ std::string GenerateFS(const BlitColorToColorWithDrawPipelineKey& pipelineKey) {
             "\toutputColor.output%u = textureLoad(srcTex%u, vec2u(position.xy), 0);\n", i, i);
     }
 
-    finalStream << "struct OutputColor {\n" << outputStructStream.str() << "}\n" << std::endl;
+    finalStream << "struct OutputColor {\n" << outputStructStream.str() << "}\n\n";
     finalStream << R"(
 @fragment fn blit_to_color(@builtin(position) position : vec4f) -> OutputColor {
     var outputColor : OutputColor;
@@ -120,14 +120,19 @@ ResultOrError<Ref<RenderPipelineBase>> GetOrCreateColorBlitPipeline(
 
     // Color target states.
     PerColorAttachment<ColorTargetState> colorTargets = {};
-    wgpu::ColorTargetStateExpandResolveTextureDawn msaaExpandResolveState;
-    msaaExpandResolveState.enabled = true;
+    PerColorAttachment<wgpu::ColorTargetStateExpandResolveTextureDawn> msaaExpandResolveStates;
 
     for (auto [i, target] : Enumerate(colorTargets)) {
         target.format = pipelineKey.colorTargetFormats[i];
         // We shouldn't change the color targets that are not involved in.
-        if (pipelineKey.attachmentsToExpandResolve[i]) {
-            target.nextInChain = &msaaExpandResolveState;
+        if (pipelineKey.resolveTargetsMask[i]) {
+            target.nextInChain = &msaaExpandResolveStates[i];
+            msaaExpandResolveStates[i].enabled = pipelineKey.attachmentsToExpandResolve[i];
+            if (msaaExpandResolveStates[i].enabled) {
+                target.writeMask = wgpu::ColorWriteMask::All;
+            } else {
+                target.writeMask = wgpu::ColorWriteMask::None;
+            }
         } else {
             target.writeMask = wgpu::ColorWriteMask::None;
         }
@@ -191,7 +196,7 @@ MaybeError ExpandResolveTextureWithDraw(DeviceBase* device,
                                         RenderPassEncoder* renderEncoder,
                                         const RenderPassDescriptor* renderPassDescriptor) {
     DAWN_ASSERT(device->IsLockedByCurrentThreadIfNeeded());
-    DAWN_ASSERT(device->IsResolveTextureBlitWithDrawSupported());
+    DAWN_ASSERT(device->CanTextureLoadResolveTargetInTheSameRenderpass());
 
     BlitColorToColorWithDrawPipelineKey pipelineKey;
     for (uint8_t i = 0; i < renderPassDescriptor->colorAttachmentCount; ++i) {
@@ -212,6 +217,7 @@ MaybeError ExpandResolveTextureWithDraw(DeviceBase* device,
                         wgpu::TextureViewDimension::e2D);
             pipelineKey.attachmentsToExpandResolve.set(colorIdx);
         }
+        pipelineKey.resolveTargetsMask.set(colorIdx, colorAttachment.resolveTarget);
 
         pipelineKey.colorTargetFormats[colorIdx] = format.format;
         pipelineKey.sampleCount = view->GetTexture()->GetSampleCount();
@@ -267,6 +273,7 @@ size_t BlitColorToColorWithDrawPipelineKey::HashFunc::operator()(
     size_t hash = 0;
 
     HashCombine(&hash, key.attachmentsToExpandResolve);
+    HashCombine(&hash, key.resolveTargetsMask);
 
     for (auto format : key.colorTargetFormats) {
         HashCombine(&hash, format);
@@ -282,6 +289,9 @@ bool BlitColorToColorWithDrawPipelineKey::EqualityFunc::operator()(
     const BlitColorToColorWithDrawPipelineKey& a,
     const BlitColorToColorWithDrawPipelineKey& b) const {
     if (a.attachmentsToExpandResolve != b.attachmentsToExpandResolve) {
+        return false;
+    }
+    if (a.resolveTargetsMask != b.resolveTargetsMask) {
         return false;
     }
 

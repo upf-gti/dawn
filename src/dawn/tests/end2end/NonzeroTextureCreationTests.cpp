@@ -68,13 +68,13 @@ class ExpectNonZero : public detail::CustomTextureExpectation {
         T value = *actual;
         if (value == T(0)) {
             return testing::AssertionFailure()
-                   << "Expected data to be non-zero, was " << value << std::endl;
+                   << "Expected data to be non-zero, was " << value << "\n";
         }
         for (size_t i = 0; i < size / DataSize(); ++i) {
             if (actual[i] != value) {
                 return testing::AssertionFailure()
                        << "Expected data[" << i << "] to match non-zero value " << value
-                       << ", actual " << actual[i] << std::endl;
+                       << ", actual " << actual[i] << "\n";
             }
         }
 
@@ -119,6 +119,11 @@ class NonzeroTextureCreationTests : public DawnTestWithParams<Params> {
 
         // You can't read compressed textures in compat mode.
         DAWN_TEST_UNSUPPORTED_IF(utils::IsCompressedTextureFormat(GetParam().mFormat) &&
+                                 IsCompatibilityMode());
+
+        // TODO(crbug.com/dawn/667): Workaround the fact that you can't use textureLoad with
+        // texture_depth_xxx in compat mode.
+        DAWN_TEST_UNSUPPORTED_IF(utils::IsDepthOrStencilFormat(GetParam().mFormat) &&
                                  IsCompatibilityMode());
 
         // TODO(crbug.com/dawn/1637): Failures with ANGLE only with some format/aspect

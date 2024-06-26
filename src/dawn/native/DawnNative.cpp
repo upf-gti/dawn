@@ -89,12 +89,20 @@ Adapter& Adapter::operator=(const Adapter& other) {
     return *this;
 }
 
-void Adapter::GetProperties(wgpu::AdapterProperties* properties) const {
-    GetProperties(reinterpret_cast<WGPUAdapterProperties*>(properties));
+wgpu::Status Adapter::GetInfo(wgpu::AdapterInfo* info) const {
+    return GetInfo(reinterpret_cast<WGPUAdapterInfo*>(info));
 }
 
-void Adapter::GetProperties(WGPUAdapterProperties* properties) const {
-    mImpl->APIGetProperties(FromAPI(properties));
+wgpu::Status Adapter::GetInfo(WGPUAdapterInfo* info) const {
+    return mImpl->APIGetInfo(FromAPI(info));
+}
+
+wgpu::Status Adapter::GetProperties(wgpu::AdapterProperties* properties) const {
+    return GetProperties(reinterpret_cast<WGPUAdapterProperties*>(properties));
+}
+
+wgpu::Status Adapter::GetProperties(WGPUAdapterProperties* properties) const {
+    return mImpl->APIGetProperties(FromAPI(properties));
 }
 
 WGPUAdapter Adapter::Get() const {
@@ -106,7 +114,7 @@ std::vector<const char*> Adapter::GetSupportedFeatures() const {
     return supportedFeaturesSet.GetEnabledFeatureNames();
 }
 
-bool Adapter::GetLimits(WGPUSupportedLimits* limits) const {
+wgpu::ConvertibleStatus Adapter::GetLimits(WGPUSupportedLimits* limits) const {
     return mImpl->APIGetLimits(FromAPI(limits));
 }
 
@@ -170,6 +178,13 @@ Instance::Instance(const WGPUInstanceDescriptor* desc)
     tint::Initialize();
 }
 
+Instance::Instance(InstanceBase* impl) : mImpl(impl) {
+    if (mImpl != nullptr) {
+        mImpl->APIAddRef();
+    }
+    tint::Initialize();
+}
+
 Instance::~Instance() {
     if (mImpl != nullptr) {
         mImpl->APIRelease();
@@ -194,18 +209,8 @@ const ToggleInfo* Instance::GetToggleInfo(const char* toggleName) {
     return mImpl->GetToggleInfo(toggleName);
 }
 
-void Instance::EnableBackendValidation(bool enableBackendValidation) {
-    if (enableBackendValidation) {
-        mImpl->SetBackendValidationLevel(BackendValidationLevel::Full);
-    }
-}
-
 void Instance::SetBackendValidationLevel(BackendValidationLevel level) {
     mImpl->SetBackendValidationLevel(level);
-}
-
-void Instance::EnableBeginCaptureOnStartup(bool beginCaptureOnStartup) {
-    mImpl->EnableBeginCaptureOnStartup(beginCaptureOnStartup);
 }
 
 uint64_t Instance::GetDeviceCountForTesting() const {

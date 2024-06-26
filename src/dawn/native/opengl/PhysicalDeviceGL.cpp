@@ -38,6 +38,7 @@
 #include "dawn/native/Instance.h"
 #include "dawn/native/opengl/ContextEGL.h"
 #include "dawn/native/opengl/DeviceGL.h"
+#include "dawn/native/opengl/DisplayEGL.h"
 
 namespace dawn::native::opengl {
 
@@ -91,45 +92,39 @@ uint32_t GetDeviceIdFromRender(std::string_view render) {
 
 // static
 ResultOrError<Ref<PhysicalDevice>> PhysicalDevice::Create(wgpu::BackendType backendType,
-                                                          void* (*getProc)(const char*),
-                                                          EGLDisplay display) {
-    EGLFunctions egl;
-    egl.Init(getProc);
+                                                          std::unique_ptr<DisplayEGL> display) {
+    const EGLFunctions& egl = display->egl;
+    EGLDisplay eglDisplay = display->GetDisplay();
 
-    EGLenum api = backendType == wgpu::BackendType::OpenGLES ? EGL_OPENGL_ES_API : EGL_OPENGL_API;
-
-    if (display == EGL_NO_DISPLAY) {
-        display = egl.GetCurrentDisplay();
-    }
-
-    if (display == EGL_NO_DISPLAY) {
-        display = egl.GetDisplay(EGL_DEFAULT_DISPLAY);
-    }
-
+    // Create a temporary context and make it current during the creation of the PhysicalDevice so
+    // that we can query the limits and other properties. Assumes that the limit are the same
+    // irrespective of the context creation options.
     std::unique_ptr<ContextEGL> context;
-    DAWN_TRY_ASSIGN(context, ContextEGL::Create(egl, api, display, false));
+    DAWN_TRY_ASSIGN(context, ContextEGL::Create(display.get(), backendType, /*useRobustness*/ false,
+                                                /*useANGLETextureSharing*/ false));
 
-    EGLContext prevDrawSurface = egl.GetCurrentSurface(EGL_DRAW);
-    EGLContext prevReadSurface = egl.GetCurrentSurface(EGL_READ);
+    EGLSurface prevDrawSurface = egl.GetCurrentSurface(EGL_DRAW);
+    EGLSurface prevReadSurface = egl.GetCurrentSurface(EGL_READ);
     EGLContext prevContext = egl.GetCurrentContext();
 
     context->MakeCurrent();
 
-    Ref<PhysicalDevice> physicalDevice = AcquireRef(new PhysicalDevice(backendType, display));
-    DAWN_TRY(physicalDevice->InitializeGLFunctions(getProc));
-    DAWN_TRY(physicalDevice->Initialize());
+    Ref<PhysicalDevice> physicalDevice =
+        AcquireRef(new PhysicalDevice(backendType, std::move(display)));
+    DAWN_TRY_WITH_CLEANUP(physicalDevice->Initialize(), {
+        egl.MakeCurrent(eglDisplay, prevDrawSurface, prevReadSurface, prevContext);
+    });
 
-    egl.MakeCurrent(display, prevDrawSurface, prevReadSurface, prevContext);
+    egl.MakeCurrent(eglDisplay, prevDrawSurface, prevReadSurface, prevContext);
+
     return physicalDevice;
 }
 
-PhysicalDevice::PhysicalDevice(wgpu::BackendType backendType, EGLDisplay display)
-    : PhysicalDeviceBase(backendType), mDisplay(display) {}
+PhysicalDevice::PhysicalDevice(wgpu::BackendType backendType, std::unique_ptr<DisplayEGL> display)
+    : PhysicalDeviceBase(backendType), mDisplay(std::move(display)) {}
 
-MaybeError PhysicalDevice::InitializeGLFunctions(void* (*getProc)(const char*)) {
-    // Use getProc to populate the dispatch table
-    mEGLFunctions.Init(getProc);
-    return mFunctions.Initialize(getProc);
+DisplayEGL* PhysicalDevice::GetDisplay() const {
+    return mDisplay.get();
 }
 
 bool PhysicalDevice::SupportsExternalImages() const {
@@ -138,6 +133,8 @@ bool PhysicalDevice::SupportsExternalImages() const {
 }
 
 MaybeError PhysicalDevice::InitializeImpl() {
+    DAWN_TRY(mFunctions.Initialize(mDisplay->egl.GetProcAddress));
+
     if (mFunctions.GetVersion().IsES()) {
         DAWN_ASSERT(GetBackendType() == wgpu::BackendType::OpenGLES);
 
@@ -216,7 +213,8 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
             EnableFeature(dawn::native::Feature::TextureCompressionBC);
         }
     }
-    if (mName.find("ANGLE") != std::string::npos) {
+
+    if (mDisplay->egl.HasExt(EGLExt::DisplayTextureShareGroup)) {
         EnableFeature(dawn::native::Feature::ANGLETextureSharing);
     }
 
@@ -334,10 +332,6 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
                                                TogglesState* deviceToggles) const {
     const OpenGLFunctions& gl = mFunctions;
 
-    bool supportsBaseVertex = gl.IsAtLeastGLES(3, 2) || gl.IsAtLeastGL(3, 2);
-
-    bool supportsBaseInstance = gl.IsAtLeastGLES(3, 2) || gl.IsAtLeastGL(4, 2);
-
     // TODO(crbug.com/dawn/582): Use OES_draw_buffers_indexed where available.
     bool supportsIndexedDrawBuffers = gl.IsAtLeastGLES(3, 2) || gl.IsAtLeastGL(3, 0);
 
@@ -363,28 +357,7 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     bool supportsStencilWriteTexture =
         gl.GetVersion().IsDesktop() || gl.IsGLExtensionSupported("GL_OES_texture_stencil8");
 
-    // TODO(crbug.com/dawn/343): We can support the extension variants, but need to load the EXT
-    // procs without the extension suffix.
-    // We'll also need emulation of shader builtins gl_BaseVertex and gl_BaseInstance.
-
-    // supportsBaseVertex |=
-    //     (gl.IsAtLeastGLES(2, 0) &&
-    //      (gl.IsGLExtensionSupported("OES_draw_elements_base_vertex") ||
-    //       gl.IsGLExtensionSupported("EXT_draw_elements_base_vertex"))) ||
-    //     (gl.IsAtLeastGL(3, 1) && gl.IsGLExtensionSupported("ARB_draw_elements_base_vertex"));
-
-    // supportsBaseInstance |=
-    //     (gl.IsAtLeastGLES(3, 1) && gl.IsGLExtensionSupported("EXT_base_instance")) ||
-    //     (gl.IsAtLeastGL(3, 1) && gl.IsGLExtensionSupported("ARB_base_instance"));
-
-    if (gl.IsAtLeastGLES(3, 1) && gl.IsGLExtensionSupported("GL_ANGLE_base_vertex_base_instance")) {
-        supportsBaseVertex = true;
-        supportsBaseInstance = true;
-    }
-
     // TODO(crbug.com/dawn/343): Investigate emulation.
-    deviceToggles->Default(Toggle::DisableBaseVertex, !supportsBaseVertex);
-    deviceToggles->Default(Toggle::DisableBaseInstance, !supportsBaseInstance);
     deviceToggles->Default(Toggle::DisableIndexedDrawBuffers, !supportsIndexedDrawBuffers);
     deviceToggles->Default(Toggle::DisableDepthRead, !supportsDepthRead);
     deviceToggles->Default(Toggle::DisableStencilRead, !supportsStencilRead);
@@ -430,9 +403,6 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
     const UnpackedPtr<DeviceDescriptor>& descriptor,
     const TogglesState& deviceToggles,
     Ref<DeviceBase::DeviceLostEvent>&& lostEvent) {
-    EGLenum api =
-        GetBackendType() == wgpu::BackendType::OpenGL ? EGL_OPENGL_API : EGL_OPENGL_ES_API;
-    std::unique_ptr<Device::Context> context;
     bool useANGLETextureSharing = false;
     for (size_t i = 0; i < descriptor->requiredFeatureCount; ++i) {
         if (descriptor->requiredFeatures[i] == wgpu::FeatureName::ANGLETextureSharing) {
@@ -440,8 +410,12 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
         }
     }
 
-    DAWN_TRY_ASSIGN(context,
-                    ContextEGL::Create(mEGLFunctions, api, mDisplay, useANGLETextureSharing));
+    bool useRobustness = !deviceToggles.IsEnabled(Toggle::DisableRobustness);
+
+    std::unique_ptr<ContextEGL> context;
+    DAWN_TRY_ASSIGN(context, ContextEGL::Create(mDisplay.get(), GetBackendType(), useRobustness,
+                                                useANGLETextureSharing));
+
     return Device::Create(adapter, descriptor, mFunctions, std::move(context), deviceToggles,
                           std::move(lostEvent));
 }
@@ -455,7 +429,9 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
     const Surface*) const {
     PhysicalDeviceSurfaceCapabilities capabilities;
 
-    // Formats
+    capabilities.usages = wgpu::TextureUsage::RenderAttachment |
+                          wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc |
+                          wgpu::TextureUsage::CopyDst;
 
     // This is the only supported format in native mode (see crbug.com/dawn/160).
 #if DAWN_PLATFORM_IS(ANDROID)
@@ -464,19 +440,14 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
     capabilities.formats.push_back(wgpu::TextureFormat::BGRA8Unorm);
 #endif  // !DAWN_PLATFORM_IS(ANDROID)
 
-    // Present Modes
-
     capabilities.presentModes = {
         wgpu::PresentMode::Fifo,
         wgpu::PresentMode::Immediate,
         wgpu::PresentMode::Mailbox,
     };
 
-    // Alpha Modes
-
     capabilities.alphaModes = {
         wgpu::CompositeAlphaMode::Opaque,
-        wgpu::CompositeAlphaMode::Auto,
     };
 
     return capabilities;

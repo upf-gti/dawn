@@ -48,7 +48,6 @@ class Device final : public ObjectWithEventsBase {
     explicit Device(const ObjectBaseParams& params,
                     const ObjectHandle& eventManagerHandle,
                     const WGPUDeviceDescriptor* descriptor);
-    ~Device() override;
 
     ObjectType GetObjectType() const override;
 
@@ -69,18 +68,24 @@ class Device final : public ObjectWithEventsBase {
     WGPUFuture CreateComputePipelineAsyncF(
         WGPUComputePipelineDescriptor const* descriptor,
         const WGPUCreateComputePipelineAsyncCallbackInfo& callbackInfo);
+    WGPUFuture CreateComputePipelineAsync2(
+        WGPUComputePipelineDescriptor const* descriptor,
+        const WGPUCreateComputePipelineAsyncCallbackInfo2& callbackInfo);
     void CreateRenderPipelineAsync(WGPURenderPipelineDescriptor const* descriptor,
                                    WGPUCreateRenderPipelineAsyncCallback callback,
                                    void* userdata);
     WGPUFuture CreateRenderPipelineAsyncF(
         WGPURenderPipelineDescriptor const* descriptor,
         const WGPUCreateRenderPipelineAsyncCallbackInfo& callbackInfo);
+    WGPUFuture CreateRenderPipelineAsync2(
+        WGPURenderPipelineDescriptor const* descriptor,
+        const WGPUCreateRenderPipelineAsyncCallbackInfo2& callbackInfo);
 
     void HandleError(WGPUErrorType errorType, const char* message);
     void HandleLogging(WGPULoggingType loggingType, const char* message);
     void HandleDeviceLost(WGPUDeviceLostReason reason, const char* message);
 
-    bool GetLimits(WGPUSupportedLimits* limits) const;
+    WGPUStatus GetLimits(WGPUSupportedLimits* limits) const;
     bool HasFeature(WGPUFeatureName feature) const;
     size_t EnumerateFeatures(WGPUFeatureName* features) const;
     void SetLimits(const WGPUSupportedLimits* limits);
@@ -107,17 +112,17 @@ class Device final : public ObjectWithEventsBase {
     struct DeviceLostInfo {
         FutureID futureID = kNullFutureID;
         std::unique_ptr<TrackedEvent> event = nullptr;
-        WGPUDeviceLostCallbackNew callback = nullptr;
-        WGPUDeviceLostCallback oldCallback = nullptr;
-        raw_ptr<void> userdata = nullptr;
+        WGPUDeviceLostCallback2 callback = nullptr;
+        raw_ptr<void> userdata1 = nullptr;
+        raw_ptr<void> userdata2 = nullptr;
     };
     DeviceLostInfo mDeviceLostInfo;
 
-    WGPUUncapturedErrorCallbackInfo mUncapturedErrorCallbackInfo;
+    WGPUUncapturedErrorCallbackInfo2 mUncapturedErrorCallbackInfo;
     WGPULoggingCallback mLoggingCallback = nullptr;
     raw_ptr<void> mLoggingUserdata = nullptr;
 
-    raw_ptr<Queue> mQueue = nullptr;
+    Ref<Queue> mQueue;
 
     std::shared_ptr<bool> mIsAlive;
 };

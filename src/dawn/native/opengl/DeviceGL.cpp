@@ -39,6 +39,9 @@
 #include "dawn/native/opengl/BufferGL.h"
 #include "dawn/native/opengl/CommandBufferGL.h"
 #include "dawn/native/opengl/ComputePipelineGL.h"
+#include "dawn/native/opengl/ContextEGL.h"
+#include "dawn/native/opengl/DisplayEGL.h"
+#include "dawn/native/opengl/PhysicalDeviceGL.h"
 #include "dawn/native/opengl/PipelineLayoutGL.h"
 #include "dawn/native/opengl/QuerySetGL.h"
 #include "dawn/native/opengl/QueueGL.h"
@@ -103,10 +106,9 @@ void KHRONOS_APIENTRY OnGLDebugMessage(GLenum source,
     }
 
     if (type == GL_DEBUG_TYPE_ERROR) {
-        dawn::WarningLog() << "OpenGL error:"
-                           << "\n    Source: " << sourceText      //
-                           << "\n    ID: " << id                  //
-                           << "\n    Severity: " << severityText  //
+        dawn::WarningLog() << "OpenGL error:" << "\n    Source: " << sourceText  //
+                           << "\n    ID: " << id                                 //
+                           << "\n    Severity: " << severityText                 //
                            << "\n    Message: " << message;
 
         // Abort on an error when in Debug mode.
@@ -122,7 +124,7 @@ namespace dawn::native::opengl {
 ResultOrError<Ref<Device>> Device::Create(AdapterBase* adapter,
                                           const UnpackedPtr<DeviceDescriptor>& descriptor,
                                           const OpenGLFunctions& functions,
-                                          std::unique_ptr<Context> context,
+                                          std::unique_ptr<ContextEGL> context,
                                           const TogglesState& deviceToggles,
                                           Ref<DeviceBase::DeviceLostEvent>&& lostEvent) {
     Ref<Device> device = AcquireRef(new Device(adapter, descriptor, functions, std::move(context),
@@ -134,7 +136,7 @@ ResultOrError<Ref<Device>> Device::Create(AdapterBase* adapter,
 Device::Device(AdapterBase* adapter,
                const UnpackedPtr<DeviceDescriptor>& descriptor,
                const OpenGLFunctions& functions,
-               std::unique_ptr<Context> context,
+               std::unique_ptr<ContextEGL> context,
                const TogglesState& deviceToggles,
                Ref<DeviceBase::DeviceLostEvent>&& lostEvent)
     : DeviceBase(adapter, descriptor, deviceToggles, std::move(lostEvent)),
@@ -257,9 +259,11 @@ ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescripto
 }
 ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
     const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
+    const std::vector<tint::wgsl::Extension>& internalExtensions,
     ShaderModuleParseResult* parseResult,
     OwnedCompilationMessages* compilationMessages) {
-    return ShaderModule::Create(this, descriptor, parseResult, compilationMessages);
+    return ShaderModule::Create(this, descriptor, internalExtensions, parseResult,
+                                compilationMessages);
 }
 ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(Surface* surface,
                                                               SwapChainBase* previousSwapChain,
@@ -274,14 +278,6 @@ ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
     TextureBase* texture,
     const UnpackedPtr<TextureViewDescriptor>& descriptor) {
     return AcquireRef(new TextureView(texture, descriptor));
-}
-
-ResultOrError<wgpu::TextureUsage> Device::GetSupportedSurfaceUsageImpl(
-    const Surface* surface) const {
-    wgpu::TextureUsage usages = wgpu::TextureUsage::RenderAttachment |
-                                wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc |
-                                wgpu::TextureUsage::CopyDst;
-    return usages;
 }
 
 MaybeError Device::ValidateTextureCanBeWrapped(const UnpackedPtr<TextureDescriptor>& descriptor) {
@@ -320,6 +316,10 @@ Ref<TextureBase> Device::CreateTextureWrappingEGLImage(const ExternalImageDescri
     if (ConsumedError(ValidateTextureCanBeWrapped(textureDescriptor))) {
         return nullptr;
     }
+    // The EGLImage was created from outside of Dawn so it must be on the same display that was
+    // provided to create the device. The best check we can do is that we indeed have
+    // EGL_KHR_image_base.
+    DAWN_ASSERT(GetEGL(false).HasExt(EGLExt::ImageBase));
 
     GLuint tex;
     gl.GenTextures(1, &tex);
@@ -449,15 +449,15 @@ const EGLFunctions& Device::GetEGL(bool makeCurrent) const {
         mContext->MakeCurrent();
         ToBackend(GetQueue())->OnGLUsed();
     }
-    return mContext->GetEGL();
-}
-
-const EGLExtensionSet& Device::GetEGLExtensions() const {
-    return mContext->GetExtensions();
+    return ToBackend(GetPhysicalDevice())->GetDisplay()->egl;
 }
 
 EGLDisplay Device::GetEGLDisplay() const {
-    return mContext->GetEGLDisplay();
+    return ToBackend(GetPhysicalDevice())->GetDisplay()->GetDisplay();
+}
+
+ContextEGL* Device::GetContext() const {
+    return mContext.get();
 }
 
 }  // namespace dawn::native::opengl

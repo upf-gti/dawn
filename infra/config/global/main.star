@@ -174,6 +174,26 @@ reclient = struct(
     ),
 )
 
+# File exclusion filters meant for use on cmake and msvc trybots since these
+# files do not affect compilation for either.
+cmake_msvc_file_exclusions = [
+    # WebGPU CTS expectations, only affects builders that run WebGPU CTS.
+    cq.location_filter(
+        path_regexp = "webgpu-cts/[^/]*expectations.txt",
+        exclude = True,
+    ),
+    # Tools written in Go.
+    cq.location_filter(
+        path_regexp = "tools/src/.+",
+        exclude = True,
+    ),
+    # Go dependencies.
+    cq.location_filter(
+        path_regexp = "go\\.(mod|sum)",
+        exclude = True,
+    ),
+]
+
 luci.notifier(
     name = "gardener-notifier",
     notify_rotation_urls = [
@@ -447,6 +467,10 @@ def dawn_standalone_builder(name, clang, debug, cpu, fuzzer):
             builder = "try/" + name,
         )
 
+        additional_filters = []
+        if config == "msvc":
+            additional_filters = cmake_msvc_file_exclusions
+
         luci.cq_tryjob_verifier(
             cq_group = "Dawn-CQ",
             builder = "dawn:try/" + name,
@@ -456,7 +480,7 @@ def dawn_standalone_builder(name, clang, debug, cpu, fuzzer):
                     path_regexp = "\\.github/.+",
                     exclude = True,
                 ),
-            ],
+            ] + additional_filters,
         )
 
         # These builders run fine unbranched on branch CLs, so add them to the
@@ -522,18 +546,20 @@ def dawn_cmake_standalone_builder(name, clang, debug, cpu, asan, ubsan, experime
         builder = "try/" + name,
     )
 
-    luci.cq_tryjob_verifier(
-        experiment_percentage = 100 if experimental else None,
-        cq_group = "Dawn-CQ",
-        builder = "dawn:try/" + name,
-        location_filters = [
-            cq.location_filter(path_regexp = ".*"),
-            cq.location_filter(
-                path_regexp = "\\.github/.+",
-                exclude = True,
-            ),
-        ],
-    )
+    # Only add CQ verifiers for non-ASAN and non-UBSAN bots to minimize CQ load.
+    if not asan and not ubsan:
+        luci.cq_tryjob_verifier(
+            experiment_percentage = 100 if experimental else None,
+            cq_group = "Dawn-CQ",
+            builder = "dawn:try/" + name,
+            location_filters = [
+                cq.location_filter(path_regexp = ".*"),
+                cq.location_filter(
+                    path_regexp = "\\.github/.+",
+                    exclude = True,
+                ),
+            ] + cmake_msvc_file_exclusions,
+        )
 
     # These builders run fine unbranched on branch CLs, so add them to the
     # branch groups as well.
@@ -771,6 +797,12 @@ tricium_dawn_tryjob()
 
 luci.cq_tryjob_verifier(
     cq_group = "Dawn-CQ",
+    builder = "chromium:try/dawn-try-linux-x64-intel-uhd770-rel",
+    includable_only = True,
+)
+
+luci.cq_tryjob_verifier(
+    cq_group = "Dawn-CQ",
     builder = "chromium:try/dawn-try-win10-x86-rel",
     includable_only = True,
 )
@@ -876,6 +908,10 @@ def _create_dawn_cq_group(name, refs, refs_exclude = None):
             failure_weight = 1,
             transient_failure_weight = 1,
             timeout_weight = 2,
+        ),
+        user_limit_default = cq.user_limit(
+            name = "default-limit",
+            run = cq.run_limits(max_active = 4),
         ),
     )
 
