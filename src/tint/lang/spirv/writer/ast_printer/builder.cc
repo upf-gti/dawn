@@ -50,6 +50,7 @@
 #include "src/tint/lang/wgsl/ast/traverse_expressions.h"
 #include "src/tint/lang/wgsl/helpers/append_vector.h"
 #include "src/tint/lang/wgsl/helpers/check_supported_extensions.h"
+#include "src/tint/lang/wgsl/sem/builtin_enum_expression.h"
 #include "src/tint/lang/wgsl/sem/builtin_fn.h"
 #include "src/tint/lang/wgsl/sem/call.h"
 #include "src/tint/lang/wgsl/sem/function.h"
@@ -494,8 +495,7 @@ bool Builder::GenerateExecutionModes(const ast::Function* func, uint32_t id) {
     }
 
     for (auto it : func_sem->TransitivelyReferencedBuiltinVariables()) {
-        auto builtin = builder_.Sem().Get(it.second)->Value();
-        if (builtin == core::BuiltinValue::kFragDepth) {
+        if (it.second->builtin == core::BuiltinValue::kFragDepth) {
             module_.PushExecutionMode(spv::Op::OpExecutionMode,
                                       {Operand(id), U32Operand(SpvExecutionModeDepthReplacing)});
             break;
@@ -520,11 +520,11 @@ uint32_t Builder::GenerateExpression(const sem::Expression* expr) {
         }
     }
     if (auto* load = expr->As<sem::Load>()) {
-        auto ref_id = GenerateExpression(load->Reference());
+        auto ref_id = GenerateExpression(load->Source());
         if (ref_id == 0) {
             return 0;
         }
-        return GenerateLoad(load->ReferenceType(), ref_id);
+        return GenerateLoad(load->MemoryView(), ref_id);
     }
     return Switch(
         expr->Declaration(),  //
@@ -792,10 +792,10 @@ bool Builder::GenerateGlobalVariable(const ast::Variable* v) {
         bool ok = Switch(
             attr,
             [&](const ast::BuiltinAttribute* builtin_attr) {
-                auto builtin = builder_.Sem().Get(builtin_attr)->Value();
-                module_.PushAnnot(spv::Op::OpDecorate,
-                                  {Operand(var_id), U32Operand(SpvDecorationBuiltIn),
-                                   U32Operand(ConvertBuiltin(builtin, sem->AddressSpace()))});
+                module_.PushAnnot(
+                    spv::Op::OpDecorate,
+                    {Operand(var_id), U32Operand(SpvDecorationBuiltIn),
+                     U32Operand(ConvertBuiltin(builtin_attr->builtin, sem->AddressSpace()))});
                 return true;
             },
             [&](const ast::LocationAttribute*) {
@@ -811,19 +811,8 @@ bool Builder::GenerateGlobalVariable(const ast::Variable* v) {
                 return true;
             },
             [&](const ast::InterpolateAttribute* interpolate) {
-                auto& s = builder_.Sem();
-                auto i_type =
-                    s.Get<sem::BuiltinEnumExpression<core::InterpolationType>>(interpolate->type)
-                        ->Value();
-
-                auto i_smpl = core::InterpolationSampling::kUndefined;
-                if (interpolate->sampling) {
-                    i_smpl = s.Get<sem::BuiltinEnumExpression<core::InterpolationSampling>>(
-                                  interpolate->sampling)
-                                 ->Value();
-                }
-
-                AddInterpolationDecorations(var_id, i_type, i_smpl);
+                AddInterpolationDecorations(var_id, interpolate->interpolation.type,
+                                            interpolate->interpolation.sampling);
                 return true;
             },
             [&](const ast::InvariantAttribute*) {
@@ -1131,7 +1120,7 @@ uint32_t Builder::GenerateIdentifierExpression(const ast::IdentifierExpression* 
                       "' does not resolve to a variable";
 }
 
-uint32_t Builder::GenerateLoad(const core::type::Reference* type, uint32_t id) {
+uint32_t Builder::GenerateLoad(const core::type::MemoryView* type, uint32_t id) {
     auto type_id = GenerateTypeIfNeeded(type->StoreType());
     auto result = result_op();
     auto result_id = std::get<uint32_t>(result);
@@ -2553,11 +2542,12 @@ uint32_t Builder::GenerateBuiltinCall(const sem::Call* call, const sem::BuiltinF
         }
         case wgsl::BuiltinFn::kSubgroupBallot: {
             module_.PushCapability(SpvCapabilityGroupNonUniformBallot);
+            auto first_param_id = get_arg_as_value_id(0);
             if (!push_function_inst(
                     spv::Op::OpGroupNonUniformBallot,
                     {Operand(result_type_id), result,
                      Operand(GenerateConstantIfNeeded(ScalarConstant::U32(SpvScopeSubgroup))),
-                     Operand(GenerateConstantIfNeeded(ScalarConstant::Bool(true)))})) {
+                     Operand(first_param_id)})) {
                 return 0;
             }
             return result_id;
@@ -2683,7 +2673,7 @@ bool Builder::GenerateTextureBuiltin(const sem::Call* call,
             auto* f32 = builder_.create<core::type::F32>();
             auto* spirv_result_type = builder_.create<core::type::Vector>(f32, 4u);
             auto spirv_result = result_op();
-            post_emission = [=] {
+            post_emission = [this, result_type, result_id, spirv_result] {
                 return push_function_inst(spv::Op::OpCompositeExtract,
                                           {result_type, result_id, spirv_result, Operand(0u)});
             };
@@ -2714,7 +2704,7 @@ bool Builder::GenerateTextureBuiltin(const sem::Call* call,
             auto* spirv_result_type =
                 builder_.create<core::type::Vector>(element_type, spirv_result_width);
             if (swizzle.size() > 1) {
-                post_emission = [=] {
+                post_emission = [this, result_type, result_id, spirv_result, swizzle] {
                     OperandList operands{
                         result_type,
                         result_id,
@@ -2727,7 +2717,7 @@ bool Builder::GenerateTextureBuiltin(const sem::Call* call,
                     return push_function_inst(spv::Op::OpVectorShuffle, operands);
                 };
             } else {
-                post_emission = [=] {
+                post_emission = [this, result_type, result_id, spirv_result, swizzle] {
                     return push_function_inst(
                         spv::Op::OpCompositeExtract,
                         {result_type, result_id, spirv_result, Operand(swizzle[0])});
@@ -4094,6 +4084,8 @@ void Builder::AddInterpolationDecorations(uint32_t id,
             module_.PushAnnot(spv::Op::OpDecorate, {Operand(id), U32Operand(SpvDecorationSample)});
             break;
         case core::InterpolationSampling::kCenter:
+        case core::InterpolationSampling::kFirst:
+        case core::InterpolationSampling::kEither:
         case core::InterpolationSampling::kUndefined:
             break;
     }

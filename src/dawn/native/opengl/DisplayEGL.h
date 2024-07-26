@@ -30,32 +30,44 @@
 
 #include <memory>
 
+#include "absl/types/span.h"  // TODO(343500108): Use std::span when we have C++20.
 #include "dawn/common/DynamicLib.h"
 #include "dawn/common/NonMovable.h"
+#include "dawn/common/Ref.h"
+#include "dawn/common/RefCounted.h"
 #include "dawn/common/egl_platform.h"
 #include "dawn/native/opengl/EGLFunctions.h"
 
 namespace dawn::native::opengl {
 
+static constexpr EGLConfig kNoConfig = 0;
+
 // Represents a connection to an EGL driver, with its EGLDisplay, its functions and other metadata
 // global to EGL.
-class DisplayEGL : NonMovable {
+class DisplayEGL : public RefCounted {
   public:
-    static ResultOrError<std::unique_ptr<DisplayEGL>> CreateFromDynamicLoading(
-        wgpu::BackendType backend,
-        const char* libName);
+    static ResultOrError<Ref<DisplayEGL>> CreateFromDynamicLoading(wgpu::BackendType backend,
+                                                                   const char* libName);
 
-    static ResultOrError<std::unique_ptr<DisplayEGL>>
-    CreateFromProcAndDisplay(wgpu::BackendType backend, EGLGetProcProc getProc, EGLDisplay display);
+    static ResultOrError<Ref<DisplayEGL>> CreateFromProcAndDisplay(wgpu::BackendType backend,
+                                                                   EGLGetProcProc getProc,
+                                                                   EGLDisplay display);
 
     explicit DisplayEGL(wgpu::BackendType backend);
-    ~DisplayEGL();
+    ~DisplayEGL() override;
 
     // A convenience ref to avoid having to call an accessor function every time we need to use EGL
     const EGLFunctions& egl;
     EGLDisplay GetDisplay() const;
     EGLint GetAPIEnum() const;
     EGLint GetAPIBit() const;
+
+    absl::Span<const wgpu::TextureFormat> GetPotentialSurfaceFormats() const;
+
+    // Chooses an EGLConfig that works for that surface type and color format.
+    EGLConfig ChooseConfig(EGLint surfaceType,
+                           wgpu::TextureFormat color,
+                           wgpu::TextureFormat depthStencil = wgpu::TextureFormat::Undefined) const;
 
   private:
     MaybeError InitializeWithDynamicLoading(const char* libName);
@@ -68,6 +80,8 @@ class DisplayEGL : NonMovable {
 
     EGLint mApiEnum;
     EGLint mApiBit;
+    // Different from mApiBit because renderables don't make a difference between GLES 2 and 3
+    EGLint mRenderableBit;
 };
 
 }  // namespace dawn::native::opengl

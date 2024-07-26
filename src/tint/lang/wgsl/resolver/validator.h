@@ -223,6 +223,17 @@ class Validator {
     /// @returns true on success, false otherwise.
     bool Assignment(const ast::Statement* a, const core::type::Type* rhs_ty) const;
 
+    /// Validates a binary expression
+    /// @param node the ast binary expression or compound assignment node
+    /// @param op the binary operator
+    /// @param lhs the left hand side sem node
+    /// @param rhs the right hand side sem node
+    /// @returns true on success, false otherwise.
+    bool BinaryExpression(const ast::Node* node,
+                          const core::BinaryOp op,
+                          const tint::sem::ValueExpression* lhs,
+                          const tint::sem::ValueExpression* rhs) const;
+
     /// Validates a break statement
     /// @param stmt the break statement to validate
     /// @param current_statement the current statement being resolved

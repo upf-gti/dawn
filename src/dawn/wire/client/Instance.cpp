@@ -67,7 +67,6 @@ class RequestAdapterEvent : public TrackedEvent {
                          WGPURequestAdapterStatus status,
                          const char* message,
                          const WGPUAdapterInfo* info,
-                         const WGPUAdapterProperties* properties,
                          const WGPUSupportedLimits* limits,
                          uint32_t featuresCount,
                          const WGPUFeatureName* features) {
@@ -78,7 +77,7 @@ class RequestAdapterEvent : public TrackedEvent {
         }
         if (status == WGPURequestAdapterStatus_Success) {
             mAdapter->SetInfo(info);
-            mAdapter->SetProperties(properties);
+            mAdapter->SetProperties(info);
             mAdapter->SetLimits(limits);
             mAdapter->SetFeatures(features, featuresCount);
         }
@@ -101,14 +100,16 @@ class RequestAdapterEvent : public TrackedEvent {
 
         if (mCallback) {
             mCallback(mStatus,
-                      mStatus == WGPURequestAdapterStatus_Success ? ReturnToAPI(mAdapter) : nullptr,
+                      mStatus == WGPURequestAdapterStatus_Success ? ReturnToAPI(std::move(mAdapter))
+                                                                  : nullptr,
                       mMessage ? mMessage->c_str() : nullptr, mUserdata1.ExtractAsDangling());
         } else {
-            mCallback2(
-                mStatus,
-                mStatus == WGPURequestAdapterStatus_Success ? ReturnToAPI(mAdapter) : nullptr,
-                mMessage ? mMessage->c_str() : nullptr, mUserdata1.ExtractAsDangling(),
-                mUserdata2.ExtractAsDangling());
+            mCallback2(mStatus,
+                       mStatus == WGPURequestAdapterStatus_Success
+                           ? ReturnToAPI(std::move(mAdapter))
+                           : nullptr,
+                       mMessage ? mMessage->c_str() : nullptr, mUserdata1.ExtractAsDangling(),
+                       mUserdata2.ExtractAsDangling());
         }
     }
 
@@ -145,10 +146,14 @@ WGPUWGSLFeatureName ToWGPUFeature(tint::wgsl::LanguageFeature f) {
 
 // Instance
 
-Instance::Instance(const ObjectBaseParams& params) : ObjectWithEventsBase(params, params.handle) {}
+Instance::Instance(const ObjectBaseParams& params)
+    : RefCountedWithExternalCount<ObjectWithEventsBase>(params, params.handle) {}
 
-Instance::~Instance() {
-    GetEventManager().TransitionTo(EventManager::State::InstanceDropped);
+void Instance::WillDropLastExternalRef() {
+    if (IsRegistered()) {
+        GetEventManager().TransitionTo(EventManager::State::InstanceDropped);
+    }
+    Unregister();
 }
 
 ObjectType Instance::GetObjectType() const {
@@ -252,12 +257,11 @@ WireResult Client::DoInstanceRequestAdapterCallback(ObjectHandle eventManager,
                                                     WGPURequestAdapterStatus status,
                                                     const char* message,
                                                     const WGPUAdapterInfo* info,
-                                                    const WGPUAdapterProperties* properties,
                                                     const WGPUSupportedLimits* limits,
                                                     uint32_t featuresCount,
                                                     const WGPUFeatureName* features) {
     return GetEventManager(eventManager)
-        .SetFutureReady<RequestAdapterEvent>(future.id, status, message, info, properties, limits,
+        .SetFutureReady<RequestAdapterEvent>(future.id, status, message, info, limits,
                                              featuresCount, features);
 }
 
@@ -343,6 +347,12 @@ size_t Instance::EnumerateWGSLLanguageFeatures(WGPUWGSLFeatureName* features) co
         }
     }
     return mWGSLFeatures.size();
+}
+
+WGPUSurface Instance::CreateSurface(const WGPUSurfaceDescriptor* desc) const {
+    dawn::ErrorLog() << "Instance::CreateSurface is not supported in the wire. Use "
+                        "dawn::wire::client::WireClient::InjectSurface instead.";
+    return nullptr;
 }
 
 }  // namespace dawn::wire::client

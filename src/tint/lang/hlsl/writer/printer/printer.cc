@@ -31,7 +31,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -68,7 +67,7 @@
 #include "src/tint/lang/core/ir/load_vector_element.h"
 #include "src/tint/lang/core/ir/loop.h"
 #include "src/tint/lang/core/ir/module.h"
-#include "src/tint/lang/core/ir/multi_in_block.h"
+#include "src/tint/lang/core/ir/multi_in_block.h"  // IWYU pragma: export
 #include "src/tint/lang/core/ir/next_iteration.h"
 #include "src/tint/lang/core/ir/return.h"
 #include "src/tint/lang/core/ir/store.h"
@@ -105,7 +104,11 @@
 #include "src/tint/lang/core/type/vector.h"
 #include "src/tint/lang/core/type/void.h"
 #include "src/tint/lang/hlsl/ir/builtin_call.h"
+#include "src/tint/lang/hlsl/ir/member_builtin_call.h"
 #include "src/tint/lang/hlsl/ir/ternary.h"
+#include "src/tint/lang/hlsl/type/byte_address_buffer.h"
+#include "src/tint/lang/hlsl/type/int8_t4_packed.h"
+#include "src/tint/lang/hlsl/type/uint8_t4_packed.h"
 #include "src/tint/utils/containers/hashmap.h"
 #include "src/tint/utils/containers/map.h"
 #include "src/tint/utils/generator/text_generator.h"
@@ -153,7 +156,11 @@ class Printer : public tint::TextGenerator {
 
     /// @returns the generated HLSL shader
     tint::Result<PrintResult> Generate() {
-        auto valid = core::ir::ValidateAndDumpIfNeeded(ir_, "HLSL writer");
+        core::ir::Capabilities capabilities{
+            core::ir::Capability::kAllowModuleScopeLets,
+            core::ir::Capability::kAllowVectorElementPointer,
+        };
+        auto valid = core::ir::ValidateAndDumpIfNeeded(ir_, "HLSL writer", capabilities);
         if (valid != Success) {
             return std::move(valid.Failure());
         }
@@ -169,7 +176,6 @@ class Printer : public tint::TextGenerator {
         StringStream ss;
         ss << preamble_buffer_.String() << "\n" << main_buffer_.String();
         result_.hlsl = ss.str();
-
         return std::move(result_);
     }
 
@@ -197,13 +203,20 @@ class Printer : public tint::TextGenerator {
     /// Block to emit for a continuing
     std::function<void()> emit_continuing_;
 
+    enum LetType : uint8_t {
+        kFunction,
+        kModuleScope,
+    };
+
     /// Emit the root block.
     /// @param root_block the root block to emit
     void EmitRootBlock(core::ir::Block* root_block) {
         for (auto* inst : *root_block) {
             Switch(
-                inst,                                                //
-                [&](core::ir::Var* v) { return EmitGlobalVar(v); },  //
+                inst,                                                          //
+                [&](core::ir::Var* v) { EmitGlobalVar(v); },                   //
+                [&](core::ir::Let* l) { EmitLet(l, LetType::kModuleScope); },  //
+                [&](core::ir::Construct*) { /* inlined  */ },                  //
                 TINT_ICE_ON_NO_MATCH);
         }
     }
@@ -239,9 +252,6 @@ class Printer : public tint::TextGenerator {
                 ++i;
 
                 auto ptr = param->Type()->As<core::type::Pointer>();
-                auto address_space = core::AddressSpace::kUndefined;
-                auto access = core::Access::kUndefined;
-
                 if (is_ep && !param->Type()->Is<core::type::Struct>()) {
                     // ICE likely indicates that the ShaderIO transform was not run, or a builtin
                     // parameter was added after it was run.
@@ -257,7 +267,7 @@ class Printer : public tint::TextGenerator {
                             out << "inout ";
                     }
                 }
-                EmitTypeAndName(out, param->Type(), address_space, access, NameOf(param));
+                EmitTypeAndName(out, param->Type(), NameOf(param));
             }
 
             out << ") {";
@@ -275,7 +285,7 @@ class Printer : public tint::TextGenerator {
         auto name = UniqueIdentifier("ary_ret");
 
         out << "typedef ";
-        EmitTypeAndName(out, ty, core::AddressSpace::kUndefined, core::Access::kReadWrite, name);
+        EmitTypeAndName(out, ty, name);
         out << ";\n" << name;
     }
 
@@ -295,14 +305,14 @@ class Printer : public tint::TextGenerator {
                 [&](const core::ir::ExitLoop*) { EmitExitLoop(); },                         //
                 [&](const core::ir::ExitSwitch*) { EmitExitSwitch(); },                     //
                 [&](const core::ir::If* i) { EmitIf(i); },                                  //
-                [&](const core::ir::Let* i) { EmitLet(i); },                                //
+                [&](const core::ir::Let* i) { EmitLet(i, LetType::kFunction); },            //
                 [&](const core::ir::StoreVectorElement* s) { EmitStoreVectorElement(s); },  //
                 [&](const core::ir::Loop* l) { EmitLoop(l); },                              //
                 [&](const core::ir::Return* i) { EmitReturn(i); },                          //
                 [&](const core::ir::Store* i) { EmitStore(i); },                            //
                 [&](const core::ir::Switch* i) { EmitSwitch(i); },                          //
                 [&](const core::ir::Unreachable*) { EmitUnreachable(); },                   //
-                [&](const core::ir::Var* v) { EmitVar(v); },                                //
+                [&](const core::ir::Var* v) { EmitVar(Line(), v); },                        //
                                                                                             //
                 [&](const core::ir::NextIteration*) { /* do nothing */ },                   //
                 [&](const core::ir::ExitIf*) { /* do nothing handled by transform */ },     //
@@ -334,9 +344,31 @@ class Printer : public tint::TextGenerator {
 
     void EmitLoadVectorElement(StringStream& out, const core::ir::LoadVectorElement* l) {
         EmitValue(out, l->From());
-        out << "[";
-        EmitValue(out, l->Index());
-        out << "]";
+
+        if (auto* cnst = l->Index()->As<core::ir::Constant>()) {
+            out << ".";
+            switch (cnst->Value()->ValueAs<uint32_t>()) {
+                case 0:
+                    out << "x";
+                    break;
+                case 1:
+                    out << "y";
+                    break;
+                case 2:
+                    out << "z";
+                    break;
+                case 3:
+                    out << "w";
+                    break;
+                default:
+                    TINT_UNREACHABLE();
+            }
+
+        } else {
+            out << "[";
+            EmitValue(out, l->Index());
+            out << "]";
+        }
     }
 
     void EmitExitSwitch() { Line() << "break;"; }
@@ -461,35 +493,39 @@ class Printer : public tint::TextGenerator {
     }
 
     void EmitGlobalVar(const core::ir::Var* var) {
-        auto* ptr = var->Result(0)->Type()->As<core::type::Pointer>();
-        TINT_ASSERT(ptr);
+        Switch(
+            var->Result(0)->Type(),  //
+            [&](const hlsl::type::ByteAddressBuffer* buf) { EmitStorageVariable(var, buf); },
+            [&](const core::type::Pointer* ptr) {
+                auto space = ptr->AddressSpace();
 
-        auto space = ptr->AddressSpace();
+                switch (space) {
+                    case core::AddressSpace::kUniform:
+                        EmitUniformVariable(var);
+                        break;
+                    case core::AddressSpace::kHandle:
+                        EmitHandleVariable(var);
+                        break;
+                    case core::AddressSpace::kPrivate: {
+                        auto out = Line();
+                        out << "static ";
+                        EmitVar(out, var);
+                        break;
+                    }
+                    case core::AddressSpace::kWorkgroup: {
+                        auto out = Line();
 
-        switch (space) {
-            case core::AddressSpace::kUniform:
-                EmitUniformVariable(var);
-                break;
-            case core::AddressSpace::kStorage:
-                EmitStorageVariable(var);
-                break;
-            case core::AddressSpace::kHandle:
-                EmitHandleVariable(var);
-                break;
-            case core::AddressSpace::kPrivate: {
-                Line() << "static";
-                EmitVar(var);
-                break;
-            }
-            case core::AddressSpace::kWorkgroup:
-                Line() << "groupshared";
-                EmitVar(var);
-                break;
-            case core::AddressSpace::kPushConstant:
-            default: {
-                TINT_ICE() << "unhandled address space " << space;
-            }
-        }
+                        out << "groupshared ";
+                        EmitVar(out, var);
+                        break;
+                    }
+                    case core::AddressSpace::kPushConstant:
+                    default: {
+                        TINT_ICE() << "unhandled address space " << space;
+                    }
+                }
+            },
+            TINT_ICE_ON_NO_MATCH);
     }
 
     void EmitUniformVariable(const core::ir::Var* var) {
@@ -503,28 +539,21 @@ class Printer : public tint::TextGenerator {
                << " {";
         {
             const ScopedIndent si(this);
-
             auto out = Line();
-            EmitTypeAndName(out, ptr->StoreType(), core::AddressSpace::kUniform, ptr->Access(),
-                            NameOf(var->Result(0)));
-
+            EmitTypeAndName(out, var->Result(0)->Type(), NameOf(var->Result(0)));
             out << ";";
         }
         Line() << "};";
     }
 
-    void EmitStorageVariable(const core::ir::Var* var) {
-        auto* ptr = var->Result(0)->Type()->As<core::type::Pointer>();
-        TINT_ASSERT(ptr);
-
+    void EmitStorageVariable(const core::ir::Var* var, const hlsl::type::ByteAddressBuffer* buf) {
         auto out = Line();
-        EmitTypeAndName(out, var->Result(0)->Type(), core::AddressSpace::kStorage, ptr->Access(),
-                        NameOf(var->Result(0)));
+        EmitTypeAndName(out, var->Result(0)->Type(), NameOf(var->Result(0)));
 
         auto bp = var->BindingPoint();
         TINT_ASSERT(bp.has_value());
 
-        out << RegisterAndSpace(ptr->Access() == core::Access::kRead ? 't' : 'u', bp.value())
+        out << RegisterAndSpace(buf->Access() == core::Access::kRead ? 't' : 'u', bp.value())
             << ";";
     }
 
@@ -550,19 +579,17 @@ class Printer : public tint::TextGenerator {
 
         // TODO(dsinclair): Handle PixelLocal::RasterizerOrderedView attribute
         auto out = Line();
-        EmitTypeAndName(out, var->Result(0)->Type(), ptr->AddressSpace(), ptr->Access(),
-                        NameOf(var->Result(0)));
+        EmitTypeAndName(out, var->Result(0)->Type(), NameOf(var->Result(0)));
         out << RegisterAndSpace(register_space, bp.value()) << ";";
     }
 
-    void EmitVar(const core::ir::Var* var) {
+    void EmitVar(StringStream& out, const core::ir::Var* var) {
         auto* ptr = var->Result(0)->Type()->As<core::type::Pointer>();
         TINT_ASSERT(ptr);
 
         auto space = ptr->AddressSpace();
 
-        auto out = Line();
-        EmitTypeAndName(out, var->Result(0)->Type(), space, ptr->Access(), NameOf(var->Result(0)));
+        EmitTypeAndName(out, var->Result(0)->Type(), NameOf(var->Result(0)));
 
         if (var->Initializer()) {
             out << " = ";
@@ -583,13 +610,16 @@ class Printer : public tint::TextGenerator {
         EmitConstant(out, ir_.constant_values.Zero(ty));
     }
 
-    void EmitLet(const core::ir::Let* l) {
+    void EmitLet(const core::ir::Let* l, LetType type) {
         auto out = Line();
+
+        if (type == LetType::kModuleScope) {
+            out << "static const ";
+        }
 
         // TODO(dsinclair): Investigate using `const` here as well, the AST printer doesn't emit
         //                  const with a let, but we should be able to.
-        EmitTypeAndName(out, l->Result(0)->Type(), core::AddressSpace::kUndefined,
-                        core::Access::kUndefined, NameOf(l->Result(0)));
+        EmitTypeAndName(out, l->Result(0)->Type(), NameOf(l->Result(0)));
         out << " = ";
         EmitValue(out, l->Value());
         out << ";";
@@ -634,11 +664,53 @@ class Printer : public tint::TextGenerator {
                     [&](const core::ir::Var* var) { out << NameOf(var->Result(0)); },  //
 
                     [&](const hlsl::ir::BuiltinCall* c) { EmitHlslBuiltinCall(out, c); },  //
-                    [&](const hlsl::ir::Ternary* t) { EmitTernary(out, t); },              //
+                    [&](const hlsl::ir::Ternary* t) { EmitTernary(out, t); },
+                    [&](const hlsl::ir::MemberBuiltinCall* mbc) {
+                        EmitHlslMemberBuiltinCall(out, mbc);
+                    },
                     TINT_ICE_ON_NO_MATCH);
             },
             [&](const core::ir::FunctionParam* p) { out << NameOf(p); },  //
             TINT_ICE_ON_NO_MATCH);
+    }
+
+    void EmitHlslMemberBuiltinCall(StringStream& out, const hlsl::ir::MemberBuiltinCall* c) {
+        BuiltinFn fn = c->Func();
+
+        std::string suffix = "";
+        if (fn == BuiltinFn::kLoadF16 || fn == BuiltinFn::kStoreF16) {
+            suffix = "<float16_t>";
+        } else if (fn == BuiltinFn::kLoad2F16 || fn == BuiltinFn::kStore2F16) {
+            // Note space between '> >' is required for DXC
+            suffix = "<vector<float16_t, 2> >";
+        } else if (fn == BuiltinFn::kLoad3F16 || fn == BuiltinFn::kStore3F16) {
+            // Note space between '> >' is required for DXC
+            suffix = "<vector<float16_t, 3> >";
+        } else if (fn == BuiltinFn::kLoad4F16 || fn == BuiltinFn::kStore4F16) {
+            // Note space between '> >' is required for DXC
+            suffix = "<vector<float16_t, 4> >";
+        }
+
+        if (fn == BuiltinFn::kLoadF16 || fn == BuiltinFn::kLoad2F16 || fn == BuiltinFn::kLoad3F16 ||
+            fn == BuiltinFn::kLoad4F16) {
+            fn = BuiltinFn::kLoad;
+        } else if (fn == BuiltinFn::kStoreF16 || fn == BuiltinFn::kStore2F16 ||
+                   fn == BuiltinFn::kStore3F16 || fn == BuiltinFn::kStore4F16) {
+            fn = BuiltinFn::kStore;
+        }
+
+        EmitValue(out, c->Object());
+        out << "." << fn << suffix << "(";
+
+        bool needs_comma = false;
+        for (const auto* arg : c->Args()) {
+            if (needs_comma) {
+                out << ", ";
+            }
+            EmitValue(out, arg);
+            needs_comma = true;
+        }
+        out << ")";
     }
 
     void EmitTernary(StringStream& out, const hlsl::ir::Ternary* t) {
@@ -653,6 +725,11 @@ class Printer : public tint::TextGenerator {
     }
 
     void EmitHlslBuiltinCall(StringStream& out, const hlsl::ir::BuiltinCall* c) {
+        if (c->Func() == hlsl::BuiltinFn::kTextureStore) {
+            EmitTextureStore(out, c);
+            return;
+        }
+
         out << c->Func() << "(";
         bool needs_comma = false;
         for (const auto* arg : c->Args()) {
@@ -663,6 +740,15 @@ class Printer : public tint::TextGenerator {
             needs_comma = true;
         }
         out << ")";
+    }
+
+    void EmitTextureStore(StringStream& out, const hlsl::ir::BuiltinCall* c) {
+        auto args = c->Args();
+        EmitValue(out, args[0]);
+        out << "[";
+        EmitValue(out, args[1]);
+        out << "] = ";
+        EmitValue(out, args[2]);
     }
 
     /// Emit a convert instruction
@@ -689,9 +775,18 @@ class Printer : public tint::TextGenerator {
         Switch(
             c->Result(0)->Type(),
             [&](const core::type::Array*) {
-                out << "{";
-                emit_args();
-                out << "}";
+                // The PromoteInitializers transform will inject splat arrays as composites of one
+                // element. These need to convert to `(type)0` in HLSL otherwise DXC will complain
+                // about missing values.
+                if (c->Args().Length() == 1) {
+                    out << "(";
+                    EmitType(out, c->Result(0)->Type());
+                    out << ")0";
+                } else {
+                    out << "{";
+                    emit_args();
+                    out << "}";
+                }
             },
             [&](const core::type::Struct*) {
                 out << "{";
@@ -843,6 +938,7 @@ class Printer : public tint::TextGenerator {
             case core::BuiltinFn::kSaturate:
             case core::BuiltinFn::kSin:
             case core::BuiltinFn::kSinh:
+            case core::BuiltinFn::kSmoothstep:
             case core::BuiltinFn::kSqrt:
             case core::BuiltinFn::kStep:
             case core::BuiltinFn::kTan:
@@ -894,8 +990,20 @@ class Printer : public tint::TextGenerator {
             case core::BuiltinFn::kReverseBits:  // uint
                 out << "reversebits";
                 break;
+            case core::BuiltinFn::kSubgroupBallot:
+                out << "WaveActiveBallot";
+                break;
             case core::BuiltinFn::kSubgroupBroadcast:
                 out << "WaveReadLaneAt";
+                break;
+            case core::BuiltinFn::kWorkgroupBarrier:
+                out << "GroupMemoryBarrierWithGroupSync";
+                break;
+            case core::BuiltinFn::kStorageBarrier:
+                out << "DeviceMemoryBarrierWithGroupSync";
+                break;
+            case core::BuiltinFn::kTextureBarrier:
+                out << "DeviceMemoryBarrierWithGroupSync";
                 break;
 
             default:
@@ -1099,13 +1207,9 @@ class Printer : public tint::TextGenerator {
         out << "}";
     }
 
-    void EmitTypeAndName(StringStream& out,
-                         const core::type::Type* type,
-                         core::AddressSpace address_space,
-                         core::Access access,
-                         const std::string& name) {
+    void EmitTypeAndName(StringStream& out, const core::type::Type* type, const std::string& name) {
         bool name_printed = false;
-        EmitType(out, type, address_space, access, name, &name_printed);
+        EmitType(out, type, name, &name_printed);
 
         if (!name.empty() && !name_printed) {
             out << " " << name;
@@ -1114,35 +1218,23 @@ class Printer : public tint::TextGenerator {
 
     void EmitType(StringStream& out,
                   const core::type::Type* ty,
-                  core::AddressSpace address_space = core::AddressSpace::kUndefined,
-                  core::Access access = core::Access::kUndefined,
                   const std::string& name = "",
                   bool* name_printed = nullptr) {
         if (name_printed) {
             *name_printed = false;
         }
 
-        switch (address_space) {
-            case core::AddressSpace::kStorage:
-                if (access != core::Access::kRead) {
+        Switch(
+            ty,
+            [&](const hlsl::type::ByteAddressBuffer* buf) {
+                if (buf->Access() != core::Access::kRead) {
                     out << "RW";
                 }
                 out << "ByteAddressBuffer";
-                return;
-            case core::AddressSpace::kUniform: {
-                auto array_length = (ty->Size() + 15) / 16;
-                out << "uint4 " << name << "[" << array_length << "]";
-                if (name_printed) {
-                    *name_printed = true;
-                }
-                return;
-            }
-            default:
-                break;
-        }
+            },
+            [&](const hlsl::type::Int8T4Packed*) { out << "int8_t4_packed"; },
+            [&](const hlsl::type::Uint8T4Packed*) { out << "uint8_t4_packed"; },
 
-        Switch(
-            ty,                                                   //
             [&](const core::type::Bool*) { out << "bool"; },      //
             [&](const core::type::F16*) { out << "float16_t"; },  //
             [&](const core::type::F32*) { out << "float"; },      //
@@ -1150,21 +1242,17 @@ class Printer : public tint::TextGenerator {
             [&](const core::type::U32*) { out << "uint"; },       //
             [&](const core::type::Void*) { out << "void"; },      //
 
-            [&](const core::type::Atomic* atomic) {
-                EmitType(out, atomic->Type(), address_space, access, name);
-            },
-            [&](const core::type::Array* ary) {
-                EmitArrayType(out, ary, address_space, access, name, name_printed);
-            },
-            [&](const core::type::Vector* vec) { EmitVectorType(out, vec, address_space, access); },
-            [&](const core::type::Matrix* mat) { EmitMatrixType(out, mat, address_space, access); },
+            [&](const core::type::Atomic* atomic) { EmitType(out, atomic->Type(), name); },
+            [&](const core::type::Array* ary) { EmitArrayType(out, ary, name, name_printed); },
+            [&](const core::type::Vector* vec) { EmitVectorType(out, vec); },
+            [&](const core::type::Matrix* mat) { EmitMatrixType(out, mat); },
             [&](const core::type::Struct* str) {
                 out << StructName(str);
                 EmitStructType(str);
             },
 
             [&](const core::type::Pointer* p) {
-                EmitType(out, p->StoreType(), p->AddressSpace(), p->Access(), name, name_printed);
+                EmitType(out, p->StoreType(), name, name_printed);
             },
             [&](const core::type::Sampler* sampler) { EmitSamplerType(out, sampler); },
             [&](const core::type::Texture* tex) { EmitTextureType(out, tex); },
@@ -1173,8 +1261,6 @@ class Printer : public tint::TextGenerator {
 
     void EmitArrayType(StringStream& out,
                        const core::type::Array* ary,
-                       core::AddressSpace address_space,
-                       core::Access access,
                        const std::string& name,
                        bool* name_printed) {
         const core::type::Type* base_type = ary;
@@ -1191,7 +1277,7 @@ class Printer : public tint::TextGenerator {
             sizes.push_back(count.value());
             base_type = arr->ElemType();
         }
-        EmitType(out, base_type, address_space, access);
+        EmitType(out, base_type);
 
         if (!name.empty()) {
             out << " " << name;
@@ -1205,10 +1291,7 @@ class Printer : public tint::TextGenerator {
         }
     }
 
-    void EmitVectorType(StringStream& out,
-                        const core::type::Vector* vec,
-                        core::AddressSpace address_space,
-                        core::Access access) {
+    void EmitVectorType(StringStream& out, const core::type::Vector* vec) {
         auto width = vec->Width();
         if (vec->type()->Is<core::type::F32>()) {
             out << "float" << width;
@@ -1221,24 +1304,21 @@ class Printer : public tint::TextGenerator {
         } else {
             // For example, use "vector<float16_t, N>" for f16 vector.
             out << "vector<";
-            EmitType(out, vec->type(), address_space, access);
+            EmitType(out, vec->type());
             out << ", " << width << ">";
         }
     }
 
-    void EmitMatrixType(StringStream& out,
-                        const core::type::Matrix* mat,
-                        core::AddressSpace address_space,
-                        core::Access access) {
+    void EmitMatrixType(StringStream& out, const core::type::Matrix* mat) {
         if (mat->type()->Is<core::type::F16>()) {
             // Use matrix<type, N, M> for f16 matrix
             out << "matrix<";
-            EmitType(out, mat->type(), address_space, access);
+            EmitType(out, mat->type());
             out << ", " << mat->columns() << ", " << mat->rows() << ">";
             return;
         }
 
-        EmitType(out, mat->type(), address_space, access);
+        EmitType(out, mat->type());
 
         // Note: HLSL's matrices are declared as <type>NxM, where N is the
         // number of rows and M is the number of columns. Despite HLSL's
@@ -1388,8 +1468,7 @@ class Printer : public tint::TextGenerator {
                 }
 
                 out << pre;
-                EmitTypeAndName(out, ty, core::AddressSpace::kUndefined, core::Access::kReadWrite,
-                                mem_name);
+                EmitTypeAndName(out, ty, mem_name);
                 out << post << ";";
             }
         }
@@ -1454,6 +1533,8 @@ class Printer : public tint::TextGenerator {
                 modifiers += "sample ";
                 break;
             case core::InterpolationSampling::kCenter:
+            case core::InterpolationSampling::kFirst:
+            case core::InterpolationSampling::kEither:
             case core::InterpolationSampling::kUndefined:
                 break;
         }

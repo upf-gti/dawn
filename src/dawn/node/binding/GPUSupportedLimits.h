@@ -28,9 +28,9 @@
 #ifndef SRC_DAWN_NODE_BINDING_GPUSUPPORTEDLIMITS_H_
 #define SRC_DAWN_NODE_BINDING_GPUSUPPORTEDLIMITS_H_
 
-#include "dawn/native/DawnNative.h"
-#include "dawn/webgpu_cpp.h"
+#include <webgpu/webgpu_cpp.h>
 
+#include "dawn/native/DawnNative.h"
 #include "src/dawn/node/interop/NodeAPI.h"
 #include "src/dawn/node/interop/WebGPU.h"
 
@@ -74,6 +74,8 @@ class GPUSupportedLimits final : public interop::GPUSupportedLimits {
     uint32_t getMaxComputeWorkgroupSizeY(Napi::Env) override;
     uint32_t getMaxComputeWorkgroupSizeZ(Napi::Env) override;
     uint32_t getMaxComputeWorkgroupsPerDimension(Napi::Env) override;
+    // TODO(349125474): Expose subgroups limits (subgroupMinSize and subgroupMinSize) in Node
+    // binding.
 
   private:
     wgpu::SupportedLimits limits_;

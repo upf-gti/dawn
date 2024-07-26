@@ -101,10 +101,11 @@ TEST_F(ResolverCompatibilityModeTest, SampleMask_Parameter) {
     // }
 
     Func("main",
-         Vector{Param("mask", ty.i32(),
-                      Vector{
-                          create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_mask")),
-                      })},
+         Vector{Param(
+             "mask", ty.i32(),
+             Vector{
+                 create<ast::BuiltinAttribute>(Source{{12, 34}}, core::BuiltinValue::kSampleMask),
+             })},
          ty.void_(), Empty,
          Vector{
              Stage(ast::PipelineStage::kFragment),
@@ -133,7 +134,7 @@ TEST_F(ResolverCompatibilityModeTest, SampleMask_ReturnValue) {
              Stage(ast::PipelineStage::kFragment),
          },
          Vector{
-             create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_mask")),
+             create<ast::BuiltinAttribute>(Source{{12, 34}}, core::BuiltinValue::kSampleMask),
          });
 
     EXPECT_FALSE(r()->Resolve());
@@ -147,14 +148,13 @@ TEST_F(ResolverCompatibilityModeTest, SampleMask_StructMember) {
     //   @builtin(sample_mask) mask : u32,
     // }
 
-    Structure(
-        "S",
-        Vector{
-            Member("mask", ty.u32(),
-                   Vector{
-                       create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_mask")),
-                   }),
-        });
+    Structure("S", Vector{
+                       Member("mask", ty.u32(),
+                              Vector{
+                                  create<ast::BuiltinAttribute>(Source{{12, 34}},
+                                                                core::BuiltinValue::kSampleMask),
+                              }),
+                   });
 
     EXPECT_FALSE(r()->Resolve());
     EXPECT_EQ(
@@ -168,10 +168,11 @@ TEST_F(ResolverCompatibilityModeTest, SampleIndex_Parameter) {
     // }
 
     Func("main",
-         Vector{Param("mask", ty.i32(),
-                      Vector{
-                          create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_index")),
-                      })},
+         Vector{Param(
+             "mask", ty.i32(),
+             Vector{
+                 create<ast::BuiltinAttribute>(Source{{12, 34}}, core::BuiltinValue::kSampleIndex),
+             })},
          ty.void_(), Empty,
          Vector{
              Stage(ast::PipelineStage::kFragment),
@@ -200,7 +201,7 @@ TEST_F(ResolverCompatibilityModeTest, SampleIndex_ReturnValue) {
              Stage(ast::PipelineStage::kFragment),
          },
          Vector{
-             create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_index")),
+             create<ast::BuiltinAttribute>(Source{{12, 34}}, core::BuiltinValue::kSampleIndex),
          });
 
     EXPECT_FALSE(r()->Resolve());
@@ -214,14 +215,13 @@ TEST_F(ResolverCompatibilityModeTest, SampleIndex_StructMember) {
     //   @builtin(sample_index) mask : u32,
     // }
 
-    Structure(
-        "S",
-        Vector{
-            Member("mask", ty.u32(),
-                   Vector{
-                       create<ast::BuiltinAttribute>({}, Expr(Source{{12, 34}}, "sample_index")),
-                   }),
-        });
+    Structure("S", Vector{
+                       Member("mask", ty.u32(),
+                              Vector{
+                                  create<ast::BuiltinAttribute>(Source{{12, 34}},
+                                                                core::BuiltinValue::kSampleIndex),
+                              }),
+                   });
 
     EXPECT_FALSE(r()->Resolve());
     EXPECT_EQ(
@@ -318,6 +318,98 @@ TEST_F(ResolverCompatibilityModeTest, SampleInterpolation_StructMember) {
     EXPECT_EQ(
         r()->error(),
         R"(12:34 error: use of '@interpolate(..., sample)' is not allowed in compatibility mode)");
+}
+
+TEST_F(ResolverCompatibilityModeTest, FirstInterpolation_Parameter) {
+    // @fragment
+    // fn main(@location(1) @interpolate(flat, first) value : f32) {
+    // }
+
+    Func("main",
+         Vector{Param("value", ty.f32(),
+                      Vector{
+                          Location(1_i),
+                          Interpolate(Source{{12, 34}}, core::InterpolationType::kFlat,
+                                      core::InterpolationSampling::kFirst),
+                      })},
+         ty.void_(), Empty,
+         Vector{
+             Stage(ast::PipelineStage::kFragment),
+         },
+         Vector{
+             Builtin(core::BuiltinValue::kPosition),
+         });
+
+    EXPECT_FALSE(r()->Resolve());
+    EXPECT_EQ(
+        r()->error(),
+        R"(12:34 error: flat interpolation must use 'either' sampling parameter in compatibility mode)");
+}
+
+TEST_F(ResolverCompatibilityModeTest, FirstInterpolation_StructMember) {
+    // struct S {
+    //   @location(1) @interpolate(flat, first) value : f32,
+    // }
+
+    Structure("S", Vector{
+                       Member("value", ty.f32(),
+                              Vector{
+                                  Location(1_i),
+                                  Interpolate(Source{{12, 34}}, core::InterpolationType::kFlat,
+                                              core::InterpolationSampling::kFirst),
+                              }),
+                   });
+
+    EXPECT_FALSE(r()->Resolve());
+    EXPECT_EQ(
+        r()->error(),
+        R"(12:34 error: flat interpolation must use 'either' sampling parameter in compatibility mode)");
+}
+
+TEST_F(ResolverCompatibilityModeTest, FlatNoneInterpolation_Parameter) {
+    // @fragment
+    // fn main(@location(1) @interpolate(flat) value : f32) {
+    // }
+
+    Func("main",
+         Vector{Param("value", ty.f32(),
+                      Vector{
+                          Location(1_i),
+                          Interpolate(Source{{12, 34}}, core::InterpolationType::kFlat,
+                                      core::InterpolationSampling::kUndefined),
+                      })},
+         ty.void_(), Empty,
+         Vector{
+             Stage(ast::PipelineStage::kFragment),
+         },
+         Vector{
+             Builtin(core::BuiltinValue::kPosition),
+         });
+
+    EXPECT_FALSE(r()->Resolve());
+    EXPECT_EQ(
+        r()->error(),
+        R"(12:34 error: flat interpolation must use 'either' sampling parameter in compatibility mode)");
+}
+
+TEST_F(ResolverCompatibilityModeTest, FlatNoneInterpolation_StructMember) {
+    // struct S {
+    //   @location(1) @interpolate(flat) value : f32,
+    // }
+
+    Structure("S", Vector{
+                       Member("value", ty.f32(),
+                              Vector{
+                                  Location(1_i),
+                                  Interpolate(Source{{12, 34}}, core::InterpolationType::kFlat,
+                                              core::InterpolationSampling::kUndefined),
+                              }),
+                   });
+
+    EXPECT_FALSE(r()->Resolve());
+    EXPECT_EQ(
+        r()->error(),
+        R"(12:34 error: flat interpolation must use 'either' sampling parameter in compatibility mode)");
 }
 
 class ResolverCompatibilityModeTest_TextureLoad : public ResolverCompatibilityModeTest {

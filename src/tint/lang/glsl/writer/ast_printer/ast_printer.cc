@@ -1938,13 +1938,13 @@ void ASTPrinter::EmitGlobalVariable(const ast::Variable* global) {
         TINT_ICE_ON_NO_MATCH);
 }
 
-void ASTPrinter::EmitUniformVariable(const ast::Var* var, const sem::Variable* sem) {
+void ASTPrinter::EmitUniformVariable(const ast::Var* var, const sem::GlobalVariable* sem) {
     auto* type = sem->Type()->UnwrapRef();
     auto* str = type->As<core::type::Struct>();
     if (TINT_UNLIKELY(!str)) {
         TINT_ICE() << "storage variable must be of struct type";
     }
-    auto bp = *sem->As<sem::GlobalVariable>()->Attributes().binding_point;
+    auto bp = *sem->Attributes().binding_point;
     {
         auto out = Line();
         out << "layout(binding = " << bp.binding << ", std140";
@@ -1956,13 +1956,13 @@ void ASTPrinter::EmitUniformVariable(const ast::Var* var, const sem::Variable* s
     Line();
 }
 
-void ASTPrinter::EmitStorageVariable(const ast::Var* var, const sem::Variable* sem) {
+void ASTPrinter::EmitStorageVariable(const ast::Var* var, const sem::GlobalVariable* sem) {
     auto* type = sem->Type()->UnwrapRef();
     auto* str = type->As<core::type::Struct>();
     if (TINT_UNLIKELY(!str)) {
         TINT_ICE() << "storage variable must be of struct type";
     }
-    auto bp = *sem->As<sem::GlobalVariable>()->Attributes().binding_point;
+    auto bp = *sem->Attributes().binding_point;
     Line() << "layout(binding = " << bp.binding << ", std430) buffer "
            << UniqueIdentifier(StructName(str) + "_ssbo") << " {";
     EmitStructMembers(current_buffer_, str);
@@ -1971,7 +1971,7 @@ void ASTPrinter::EmitStorageVariable(const ast::Var* var, const sem::Variable* s
     Line();
 }
 
-void ASTPrinter::EmitHandleVariable(const ast::Var* var, const sem::Variable* sem) {
+void ASTPrinter::EmitHandleVariable(const ast::Var* var, const sem::GlobalVariable* sem) {
     auto out = Line();
 
     auto name = var->name->symbol.Name();
@@ -1982,7 +1982,8 @@ void ASTPrinter::EmitHandleVariable(const ast::Var* var, const sem::Variable* se
     }
 
     if (auto* storage = type->As<core::type::StorageTexture>()) {
-        out << "layout(";
+        auto bp = *sem->Attributes().binding_point;
+        out << "layout(binding = " << bp.binding << ", ";
         switch (storage->texel_format()) {
             case core::TexelFormat::kBgra8Unorm:
                 TINT_ICE() << "bgra8unorm should have been polyfilled to rgba8unorm";
@@ -2085,9 +2086,8 @@ void ASTPrinter::EmitIOVariable(const sem::GlobalVariable* var) {
     auto* decl = var->Declaration();
 
     if (auto* attr = ast::GetAttribute<ast::BuiltinAttribute>(decl->attributes)) {
-        auto builtin = builder_.Sem().Get(attr)->Value();
         // Use of gl_SampleID requires the GL_OES_sample_variables extension
-        if (RequiresOESSampleVariables(builtin)) {
+        if (RequiresOESSampleVariables(attr->builtin)) {
             requires_oes_sample_variables_ = true;
         }
         // Do not emit builtin (gl_) variables.
@@ -2125,11 +2125,7 @@ void ASTPrinter::EmitInterpolationQualifiers(StringStream& out,
                                              VectorRef<const ast::Attribute*> attributes) {
     for (auto* attr : attributes) {
         if (auto* interpolate = attr->As<ast::InterpolateAttribute>()) {
-            auto& sem = builder_.Sem();
-            auto i_type =
-                sem.Get<sem::BuiltinEnumExpression<core::InterpolationType>>(interpolate->type)
-                    ->Value();
-            switch (i_type) {
+            switch (interpolate->interpolation.type) {
                 case core::InterpolationType::kPerspective:
                 case core::InterpolationType::kLinear:
                 case core::InterpolationType::kUndefined:
@@ -2139,19 +2135,16 @@ void ASTPrinter::EmitInterpolationQualifiers(StringStream& out,
                     break;
             }
 
-            if (interpolate->sampling) {
-                auto i_smpl = sem.Get<sem::BuiltinEnumExpression<core::InterpolationSampling>>(
-                                     interpolate->sampling)
-                                  ->Value();
-                switch (i_smpl) {
-                    case core::InterpolationSampling::kCentroid:
-                        out << "centroid ";
-                        break;
-                    case core::InterpolationSampling::kSample:
-                    case core::InterpolationSampling::kCenter:
-                    case core::InterpolationSampling::kUndefined:
-                        break;
-                }
+            switch (interpolate->interpolation.sampling) {
+                case core::InterpolationSampling::kCentroid:
+                    out << "centroid ";
+                    break;
+                case core::InterpolationSampling::kSample:
+                case core::InterpolationSampling::kCenter:
+                case core::InterpolationSampling::kFirst:
+                case core::InterpolationSampling::kEither:
+                case core::InterpolationSampling::kUndefined:
+                    break;
             }
         }
     }

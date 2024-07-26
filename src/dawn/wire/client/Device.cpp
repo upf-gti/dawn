@@ -128,10 +128,11 @@ class CreatePipelineEventBase : public TrackedEvent {
             mMessage = "A valid external Instance reference no longer exists.";
         }
 
-        mCallback(
-            mStatus,
-            mStatus == WGPUCreatePipelineAsyncStatus_Success ? ReturnToAPI(mPipeline) : nullptr,
-            mMessage ? mMessage->c_str() : nullptr, userdata1, userdata2);
+        mCallback(mStatus,
+                  mStatus == WGPUCreatePipelineAsyncStatus_Success
+                      ? ReturnToAPI(std::move(mPipeline))
+                      : nullptr,
+                  mMessage ? mMessage->c_str() : nullptr, userdata1, userdata2);
     }
 
     using Callback = decltype(std::declval<CallbackInfo>().callback);
@@ -251,8 +252,10 @@ class Device::DeviceLostEvent : public TrackedEvent {
 
 Device::Device(const ObjectBaseParams& params,
                const ObjectHandle& eventManagerHandle,
+               Adapter* adapter,
                const WGPUDeviceDescriptor* descriptor)
-    : ObjectWithEventsBase(params, eventManagerHandle), mIsAlive(std::make_shared<bool>(true)) {
+    : RefCountedWithExternalCount<ObjectWithEventsBase>(params, eventManagerHandle),
+      mAdapter(adapter) {
 #if defined(DAWN_ENABLE_ASSERTS)
     static constexpr WGPUDeviceLostCallbackInfo2 kDefaultDeviceLostCallbackInfo = {
         nullptr, WGPUCallbackMode_AllowSpontaneous,
@@ -320,15 +323,15 @@ ObjectType Device::GetObjectType() const {
     return ObjectType::Device;
 }
 
-uint32_t Device::Release() {
-    // The device always has a reference in it's DeviceLossEvent which is created at construction,
-    // so when we drop to 1, we want to set the event so that the device can be loss according to
-    // the callback mode.
-    uint32_t refCount = ObjectBase::Release();
-    if (refCount == 1) {
+bool Device::IsAlive() const {
+    return mIsAlive;
+}
+
+void Device::WillDropLastExternalRef() {
+    if (IsRegistered()) {
         HandleDeviceLost(WGPUDeviceLostReason_Destroyed, "Device was destroyed.");
     }
-    return refCount;
+    Unregister();
 }
 
 WGPUStatus Device::GetLimits(WGPUSupportedLimits* limits) const {
@@ -373,6 +376,7 @@ void Device::HandleDeviceLost(WGPUDeviceLostReason reason, const char* message) 
         DAWN_CHECK(GetEventManager().SetFutureReady<DeviceLostEvent>(futureID, reason, message) ==
                    WireResult::Success);
     }
+    mIsAlive = false;
 }
 
 WGPUFuture Device::GetDeviceLostFuture() {
@@ -385,10 +389,6 @@ WGPUFuture Device::GetDeviceLostFuture() {
         }
     }
     return {mDeviceLostInfo.futureID};
-}
-
-std::weak_ptr<bool> Device::GetAliveWeakPtr() {
-    return mIsAlive;
 }
 
 void Device::SetUncapturedErrorCallback(WGPUErrorCallback errorCallback, void* errorUserdata) {
@@ -478,6 +478,15 @@ WGPUBuffer Device::CreateBuffer(const WGPUBufferDescriptor* descriptor) {
     return Buffer::Create(this, descriptor);
 }
 
+WGPUBuffer Device::CreateErrorBuffer(const WGPUBufferDescriptor* descriptor) {
+    return Buffer::CreateError(this, descriptor);
+}
+
+WGPUAdapter Device::GetAdapter() const {
+    Ref<Adapter> adapter = mAdapter;
+    return ReturnToAPI(std::move(adapter));
+}
+
 WGPUQueue Device::GetQueue() {
     // The queue is lazily created because if a Device is created by
     // Reserve/Inject, we cannot send the GetQueue message until
@@ -495,7 +504,8 @@ WGPUQueue Device::GetQueue() {
         client->SerializeCommand(cmd);
     }
 
-    return ReturnToAPI(mQueue);
+    Ref<Queue> queue = mQueue;
+    return ReturnToAPI(std::move(queue));
 }
 
 template <typename Event, typename Cmd, typename CallbackInfo, typename Descriptor>
@@ -606,6 +616,14 @@ WireResult Client::DoDeviceCreateRenderPipelineAsyncCallback(ObjectHandle eventM
                                                              const char* message) {
     return GetEventManager(eventManager)
         .SetFutureReady<CreateRenderPipelineEvent>(future.id, status, message);
+}
+
+void Device::Destroy() {
+    DeviceDestroyCmd cmd;
+    cmd.self = ToAPI(this);
+    GetClient()->SerializeCommand(cmd);
+
+    mIsAlive = false;
 }
 
 }  // namespace dawn::wire::client

@@ -160,6 +160,56 @@ fn f() -> @builtin(position) vec4<f32> {
 )");
 }
 
+TEST_F(IRToProgramTest, EntryPoint_Parameter_BuiltinAndInvariant) {
+    auto* fn = b.Function("f", ty.void_(), core::ir::Function::PipelineStage::kFragment);
+    auto* param = b.FunctionParam("input", ty.vec4<f32>());
+    param->SetBuiltin(core::BuiltinValue::kPosition);
+    param->SetInvariant(true);
+    fn->SetParams({param});
+
+    fn->Block()->Append(b.Return(fn));
+
+    EXPECT_WGSL(R"(
+@fragment
+fn f(@builtin(position) @invariant input : vec4<f32>) {
+}
+)");
+}
+
+TEST_F(IRToProgramTest, EntryPoint_Parameter_LocationAndInterpolation) {
+    auto* fn = b.Function("f", ty.void_(), core::ir::Function::PipelineStage::kFragment);
+    auto* param = b.FunctionParam("input", ty.f32());
+    param->SetLocation(2u);
+    param->SetInterpolation(core::Interpolation{core::InterpolationType::kLinear,
+                                                core::InterpolationSampling::kCentroid});
+    fn->SetParams({param});
+
+    fn->Block()->Append(b.Return(fn));
+
+    EXPECT_WGSL(R"(
+@fragment
+fn f(@location(2u) @interpolate(linear, centroid) input : f32) {
+}
+)");
+}
+
+TEST_F(IRToProgramTest, EntryPoint_Parameter_Color) {
+    auto* fn = b.Function("f", ty.void_(), core::ir::Function::PipelineStage::kFragment);
+    auto* param = b.FunctionParam("input", ty.f32());
+    param->SetColor(2u);
+    fn->SetParams({param});
+
+    fn->Block()->Append(b.Return(fn));
+
+    EXPECT_WGSL(R"(
+enable chromium_experimental_framebuffer_fetch;
+
+@fragment
+fn f(@color(2u) input : f32) {
+}
+)");
+}
+
 TEST_F(IRToProgramTest, EntryPoint_ReturnAttribute_FragDepth) {
     auto* fn = b.Function("f", ty.f32(), core::ir::Function::PipelineStage::kFragment);
     fn->SetReturnBuiltin(core::BuiltinValue::kFragDepth);
@@ -205,7 +255,7 @@ fn f() -> @builtin(position) @invariant vec4<f32> {
 
 TEST_F(IRToProgramTest, EntryPoint_ReturnAttribute_Location) {
     auto* fn = b.Function("f", ty.vec4<f32>(), core::ir::Function::PipelineStage::kFragment);
-    fn->SetReturnLocation(1, std::nullopt);
+    fn->SetReturnLocation(1);
 
     fn->Block()->Append(b.Return(fn, b.Splat<vec4<f32>>(0_f)));
 
@@ -2348,6 +2398,75 @@ fn f(cond : bool) {
 )");
 }
 
+TEST_F(IRToProgramTest, While_BreakAfterStatement) {
+    auto* fn = b.Function("f", ty.void_());
+
+    b.Append(fn->Block(), [&] {
+        auto* loop = b.Loop();
+
+        b.Append(loop->Body(), [&] {
+            auto* let = b.Let("cond", true);
+            auto* cond = b.If(let);
+            b.Append(cond->True(), [&] { b.ExitIf(cond); });
+            b.Append(cond->False(), [&] { b.ExitLoop(loop); });
+
+            b.ExitLoop(loop);
+        });
+
+        b.Return(fn);
+    });
+
+    EXPECT_WGSL(R"(
+fn f() {
+  loop {
+    let cond = true;
+    if (cond) {
+    } else {
+      break;
+    }
+    break;
+  }
+}
+)");
+}
+
+// Test that only the first "if continue then break" instruction is treated as the loop condition.
+// See crbug.com/351700183.
+TEST_F(IRToProgramTest, While_IfBreakInFalse) {
+    auto* fn = b.Function("f", ty.void_());
+    auto* cond = b.FunctionParam("cond", ty.bool_());
+    fn->SetParams({cond});
+
+    b.Append(fn->Block(), [&] {
+        auto* loop = b.Loop();
+
+        b.Append(loop->Body(), [&] {
+            auto* if1 = b.If(true);
+            b.Append(if1->True(), [&] { b.ExitIf(if1); });
+            b.Append(if1->False(), [&] { b.ExitLoop(loop); });
+
+            auto* if2 = b.If(cond);
+            b.Append(if2->True(), [&] { b.ExitIf(if2); });
+            b.Append(if2->False(), [&] { b.ExitLoop(loop); });
+
+            b.Continue(loop);
+        });
+
+        b.Return(fn);
+    });
+
+    EXPECT_WGSL(R"(
+fn f(cond : bool) {
+  while(true) {
+    if (cond) {
+    } else {
+      break;
+    }
+  }
+}
+)");
+}
+
 TEST_F(IRToProgramTest, While_IfReturn) {
     auto* fn = b.Function("f", ty.void_());
     auto* cond = b.FunctionParam("cond", ty.bool_());
@@ -2548,8 +2667,8 @@ fn f() {
 TEST_F(IRToProgramTest, Enable_ChromiumExperimentalSubgroups_SubgroupBallot) {
     auto* fn = b.Function("f", ty.void_());
     b.Append(fn->Block(), [&] {
-        auto* call = b.Append(mod.allocators.instructions.Create<wgsl::ir::BuiltinCall>(
-            b.InstructionResult(ty.vec4<u32>()), wgsl::BuiltinFn::kSubgroupBallot, Empty));
+        auto* call = b.CallWithResult<wgsl::ir::BuiltinCall>(
+            b.InstructionResult(ty.vec4<u32>()), wgsl::BuiltinFn::kSubgroupBallot, true);
         b.Let("v", call);
         b.Return(fn);
     });
@@ -2558,7 +2677,7 @@ TEST_F(IRToProgramTest, Enable_ChromiumExperimentalSubgroups_SubgroupBallot) {
 enable chromium_experimental_subgroups;
 
 fn f() {
-  let v = subgroupBallot();
+  let v = subgroupBallot(true);
 }
 )");
 }
@@ -2567,8 +2686,8 @@ TEST_F(IRToProgramTest, Enable_ChromiumExperimentalSubgroups_SubgroupBroadcast) 
     auto* fn = b.Function("f", ty.void_());
     b.Append(fn->Block(), [&] {
         auto* one = b.Value(1_u);
-        auto* call = b.Append(mod.allocators.instructions.Create<wgsl::ir::BuiltinCall>(
-            b.InstructionResult(ty.u32()), wgsl::BuiltinFn::kSubgroupBroadcast, Vector{one, one}));
+        auto* call = b.CallWithResult<wgsl::ir::BuiltinCall>(
+            b.InstructionResult(ty.u32()), wgsl::BuiltinFn::kSubgroupBroadcast, Vector{one, one});
         b.Let("v", call);
         b.Return(fn);
     });
@@ -2625,6 +2744,31 @@ enable chromium_experimental_subgroups;
 struct S {
   @builtin(subgroup_size)
   a : u32,
+}
+
+fn f(v : S) {
+}
+)");
+}
+
+TEST_F(IRToProgramTest, Enable_ChromiumExperimentalFramebufferFetch_StructColor) {
+    core::type::Manager::StructMemberDesc member;
+    member.name = mod.symbols.New("a");
+    member.type = ty.f32();
+    member.attributes.color = 2u;
+
+    auto* S = ty.Struct(mod.symbols.New("S"), {member});
+
+    auto* fn = b.Function("f", ty.void_());
+    fn->SetParams({b.FunctionParam(S)});
+    b.Append(fn->Block(), [&] { b.Return(fn); });
+
+    EXPECT_WGSL(R"(
+enable chromium_experimental_framebuffer_fetch;
+
+struct S {
+  @color(2u)
+  a : f32,
 }
 
 fn f(v : S) {

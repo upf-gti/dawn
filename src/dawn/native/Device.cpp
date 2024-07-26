@@ -27,6 +27,8 @@
 
 #include "dawn/native/Device.h"
 
+#include <webgpu/webgpu.h>
+
 #include <algorithm>
 #include <array>
 #include <mutex>
@@ -77,7 +79,6 @@
 #include "dawn/platform/DawnPlatform.h"
 #include "dawn/platform/metrics/HistogramMacros.h"
 #include "dawn/platform/tracing/TraceEvent.h"
-#include "dawn/webgpu.h"
 #include "partition_alloc/pointers/raw_ptr.h"
 
 namespace dawn::native {
@@ -375,8 +376,8 @@ DeviceBase::DeviceBase(AdapterBase* adapter,
             reinterpret_cast<void*>(callbackInfo.callback), callbackInfo.userdata};
     }
 
-    AdapterProperties adapterProperties;
-    adapter->APIGetProperties(&adapterProperties);
+    AdapterInfo adapterInfo;
+    adapter->APIGetInfo(&adapterInfo);
 
     ApplyFeatures(descriptor);
 
@@ -435,11 +436,11 @@ DeviceBase::DeviceBase(AdapterBase* adapter,
 
     mIsImmediateErrorHandlingEnabled = IsToggleEnabled(Toggle::EnableImmediateErrorHandling);
 
-    // Record the cache key from the properties. Note that currently, if a new extension
+    // Record the cache key from the adapter info. Note that currently, if a new extension
     // descriptor is added (and probably handled here), the cache key recording needs to be
     // updated.
-    StreamIn(&mDeviceCacheKey, kDawnVersion, adapterProperties, mEnabledFeatures.featuresBitSet,
-             mToggles, cacheDesc);
+    StreamIn(&mDeviceCacheKey, kDawnVersion, adapterInfo, mEnabledFeatures.featuresBitSet, mToggles,
+             cacheDesc);
 }
 
 DeviceBase::DeviceBase() : mState(State::Alive), mToggles(ToggleStage::Device) {
@@ -983,14 +984,15 @@ MaybeError DeviceBase::ValidateIsAlive() const {
     return {};
 }
 
-void DeviceBase::APIForceLoss(wgpu::DeviceLostReason reason, const char* message) {
+void DeviceBase::APIForceLoss2(wgpu::DeviceLostReason reason, std::string_view message) {
+    message = utils::NormalizeLabel(message);
     if (mState != State::Alive) {
         return;
     }
     // Note that since we are passing None as the allowedErrors, an additional message will be
     // appended noting that the error was unexpected. Since this call is for testing only it is not
     // too important, but useful for users to understand where the extra message is coming from.
-    HandleError(DAWN_INTERNAL_ERROR(message), InternalErrorType::None, ToAPI(reason));
+    HandleError(DAWN_INTERNAL_ERROR(std::string(message)), InternalErrorType::None, ToAPI(reason));
 }
 
 DeviceBase::State DeviceBase::GetState() const {
@@ -1604,8 +1606,8 @@ ShaderModuleBase* DeviceBase::APICreateShaderModule(const ShaderModuleDescriptor
     return ReturnToAPI(std::move(result));
 }
 
-ShaderModuleBase* DeviceBase::APICreateErrorShaderModule(const ShaderModuleDescriptor* descriptor,
-                                                         const char* errorMessage) {
+ShaderModuleBase* DeviceBase::APICreateErrorShaderModule2(const ShaderModuleDescriptor* descriptor,
+                                                          std::string_view errorMessage) {
     Ref<ShaderModuleBase> result =
         ShaderModuleBase::MakeError(this, descriptor ? descriptor->label : nullptr);
     std::unique_ptr<OwnedCompilationMessages> compilationMessages(
@@ -1845,9 +1847,16 @@ void DeviceBase::SetWGSLExtensionAllowList() {
     if (mEnabledFeatures.IsEnabled(Feature::ShaderF16)) {
         mWGSLAllowedFeatures.extensions.insert(tint::wgsl::Extension::kF16);
     }
+    // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
     if (mEnabledFeatures.IsEnabled(Feature::ChromiumExperimentalSubgroups)) {
         mWGSLAllowedFeatures.extensions.insert(
             tint::wgsl::Extension::kChromiumExperimentalSubgroups);
+    }
+    if (mEnabledFeatures.IsEnabled(Feature::Subgroups)) {
+        mWGSLAllowedFeatures.extensions.insert(tint::wgsl::Extension::kSubgroups);
+    }
+    if (mEnabledFeatures.IsEnabled(Feature::SubgroupsF16)) {
+        mWGSLAllowedFeatures.extensions.insert(tint::wgsl::Extension::kSubgroupsF16);
     }
     if (IsToggleEnabled(Toggle::AllowUnsafeAPIs)) {
         mWGSLAllowedFeatures.extensions.insert(
@@ -2007,7 +2016,7 @@ size_t DeviceBase::APIEnumerateFeatures(wgpu::FeatureName* features) const {
     return mEnabledFeatures.EnumerateFeatures(features);
 }
 
-void DeviceBase::APIInjectError(wgpu::ErrorType type, const char* message) {
+void DeviceBase::APIInjectError2(wgpu::ErrorType type, std::string_view message) {
     if (ConsumedError(ValidateErrorType(type))) {
         return;
     }
@@ -2020,7 +2029,9 @@ void DeviceBase::APIInjectError(wgpu::ErrorType type, const char* message) {
         return;
     }
 
-    HandleError(DAWN_MAKE_ERROR(FromWGPUErrorType(type), message), InternalErrorType::OutOfMemory);
+    message = utils::NormalizeLabel(message);
+    HandleError(DAWN_MAKE_ERROR(FromWGPUErrorType(type), std::string(message)),
+                InternalErrorType::OutOfMemory);
 }
 
 void DeviceBase::APIValidateTextureDescriptor(const TextureDescriptor* descriptorOrig) {
@@ -2497,7 +2508,12 @@ const std::string& DeviceBase::GetLabel() const {
 }
 
 void DeviceBase::APISetLabel(const char* label) {
-    mLabel = label;
+    mLabel = label ? label : "";
+    SetLabelImpl();
+}
+
+void DeviceBase::APISetLabel2(std::optional<std::string_view> label) {
+    mLabel = utils::NormalizeLabel(label);
     SetLabelImpl();
 }
 
@@ -2522,6 +2538,10 @@ bool DeviceBase::ShouldApplyIndexBufferOffsetToFirstIndex() const {
 }
 
 bool DeviceBase::CanTextureLoadResolveTargetInTheSameRenderpass() const {
+    return false;
+}
+
+bool DeviceBase::PreferNotUsingMappableOrUniformBufferAsStorage() const {
     return false;
 }
 

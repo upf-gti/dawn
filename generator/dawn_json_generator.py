@@ -28,8 +28,9 @@
 
 import json, os, sys
 from collections import namedtuple, defaultdict
+from copy import deepcopy
 
-from generator_lib import Generator, run_generator, FileRender
+from generator_lib import Generator, run_generator, FileRender, GeneratorOutput
 
 ############################################################
 # OBJECT MODEL
@@ -93,7 +94,6 @@ class Name:
                 result += '-'
             result += chunk.lower()
         return result
-
 
 def concat_names(*names):
     return ' '.join([name.canonical_case() for name in names])
@@ -356,7 +356,6 @@ class StructureType(Record, Type):
 
 
 class CallbackInfoType(StructureType):
-
     def __init__(self, is_enabled, name, json_data):
         StructureType.__init__(self, is_enabled, name, json_data)
         self.extensible = 'in'
@@ -803,8 +802,8 @@ def as_protobufMemberNameLPM(*names):
     return ''.join([name.concatcase().lower() for name in names])
 
 
-def unreachable_code():
-    assert False
+def unreachable_code(msg="unreachable_code"):
+    assert False, msg
 
 
 ############################################################
@@ -818,52 +817,65 @@ def compute_kotlin_params(loaded_json, kotlin_json):
     params_kotlin['jni_primitives'] = kotlin_json['jni_primitives']
     kt_file_path = params_kotlin['kotlin_package'].replace('.', '/')
 
-    # The 'length' members are removed as Kotlin can infer that from the container.
-    # 'length' members are identified when some *other* member specifies its name as the
-    # length parameter. Void pointer members refer to binary structures that cannot be used by
-    # clients without conversion to ART types in handwritten code, so we don't convert those.
-    def include_structure_member(structure, member):
-        if member.type.category in ['callback info', 'function pointer']:
-            return False
-        if member.type.name.get() in ['void *', 'void const *']:
-            return False
-        for other in structure.members:
-            if other.length == member:
-                return False
-        return True
+    def kotlin_record_members(members):
+        for member in members:
+            # Skip over callback infos as we haven't implemented support for them yet.
+            # TODO(352710628) support converting callback info.
+            if member.type.category in ['callback info']:
+                continue
 
-    def filter_arguments(arguments):
-        for argument in arguments:
             # length parameters are omitted because Kotlin containers have 'length'.
-            if argument in [arg.length for arg in arguments]:
+            if member in [m.length for m in members]:
                 continue
 
             # userdata parameter omitted because Kotlin clients can achieve the same with closures.
-            if argument.name.get() == 'userdata':
+            if member.name.get() == 'userdata':
                 continue
 
-            yield argument
+            # Dawn uses 'annotation = *' for output parameters, for example to return arrays.
+            # We convert the return type and strip out the parameters.
+            if member.annotation == '*':
+                continue
 
+            yield member
+
+    def kotlin_return(method):
+        for argument in method.arguments:
+            if argument.annotation == '*':
+                # TODO(b/352048981): Use handwritten methods for container returns to avoid the need
+                # for special casing logic.
+                if method.return_type.name.get() == 'size_t':
+                    # Convert the output parameter to a Kotlin return container.
+                    container_type = deepcopy(argument)
+                    container_type.length = 'size_t'
+                    return container_type
+                if (method.return_type.name.get() == 'status'
+                        and argument.type.category == 'structure'):
+                    return argument
+
+        return {"type": method.return_type, "name": None}
+
+    # TODO(b/352047733): Replace methods that require special handling with an exceptions list.
     def include_method(method):
         if method.return_type.category == 'function pointer':
             # Kotlin doesn't support returning functions.
             return False
         for argument in method.arguments:
-            if argument.annotation == '*':
-                # Dawn uses 'annotation = *' for output parameters, for example to return arrays.
-                # Kotlin doesn't support that at the moment
-                return False
             if argument.type.category == 'callback info':
                 # We don't handle this yet.
                 return False
             if argument.annotation == 'value' and argument.type.category == 'structure':
                 # Passing structures by value is not supported at the moment.
                 return False
-            if argument.type.category == 'function pointer':
-                # Currently returning structures in callbacks is not supported.
-                for callback_arg in argument.type.arguments:
-                    if callback_arg.type.category == 'structure':
-                        return False
+        return True
+
+    def include_structure(structure):
+        # TODO(352710628) support converting callback info.
+        if structure.name.canonical_case().endswith(" callback info"):
+            return False
+        if (structure.name.canonical_case() == "string view"
+                or structure.name.canonical_case() == "nullable string view"):
+            return False
         return True
 
     def jni_name(type):
@@ -872,7 +884,7 @@ def compute_kotlin_params(loaded_json, kotlin_json):
     # We assume that if the final two parameters are named 'userdata' and 'callback' respectively
     # that this is an async method that uses function pointer based callbacks.
     def is_async_method(method):
-        if len(method.arguments) < 3:
+        if len(method.arguments) < 2:
             return False  # Not enough parameters to be an async method.
         if method.arguments[-1].name.get() != 'userdata':
             return False
@@ -887,9 +899,10 @@ def compute_kotlin_params(loaded_json, kotlin_json):
         for chain_root in structure.chain_roots:
             chain_children[chain_root.name.get()].append(structure)
     params_kotlin['chain_children'] = chain_children
-    params_kotlin['filter_arguments'] = filter_arguments
-    params_kotlin['include_structure_member'] = include_structure_member
+    params_kotlin['kotlin_return'] = kotlin_return
     params_kotlin['include_method'] = include_method
+    params_kotlin['include_structure'] = include_structure
+    params_kotlin['kotlin_record_members'] = kotlin_record_members
     params_kotlin['jni_name'] = jni_name
     params_kotlin['is_async_method'] = is_async_method
     return params_kotlin
@@ -909,16 +922,11 @@ def as_cType(c_prefix, name):
     # Special case for 'bool' because it has a typedef for compatibility.
     if name.native and name.get() != 'bool':
         return name.concatcase()
+    elif name.get() == 'nullable string view':
+        # nullable string view type doesn't exist in C.
+        return c_prefix + 'StringView'
     else:
         return c_prefix + name.CamelCase()
-
-
-def as_cReturnType(c_prefix, typ):
-    if typ.category != 'bitmask':
-        return as_cType(c_prefix, typ.name)
-    else:
-        return as_cType(c_prefix, typ.name) + 'Flags'
-
 
 def as_cppType(name):
     # Special case for 'bool' because it has a typedef for compatibility.
@@ -935,6 +943,37 @@ def as_ktName(name):
 def as_jsEnumValue(value):
     if 'jsrepr' in value.json_data: return value.json_data['jsrepr']
     return "'" + value.name.js_enum_case() + "'"
+
+
+def has_wasmType(return_type, args):
+    return all(map(lambda x: len(as_wasmType(x)) == 1, [return_type] + args))
+
+
+# Returns a single character wasm type (v/p/i/j/f/d) if valid, a "(longer string)" if not
+def as_wasmType(x):
+    if isinstance(x, RecordMember):
+        if x.annotation == 'value':
+            x = x.type
+        elif '*' in x.annotation:
+            return 'p'
+        else:
+            return f'({x})'
+
+    if isinstance(x, Type):
+        if x.category == 'enum':
+            return 'i'
+        elif x.category == 'bitmask':
+            # TODO(crbug.com/347732150): Change to 'j' when bitmasks are 64-bit
+            return 'i'
+        elif x.category in ['object', 'function pointer']:
+            return 'p'
+        elif x.category == 'native':
+            return x.json_data.get('wasm type', f'({x.name.name})')
+        elif x.category in ['structure', 'callback info']:
+            return f'({x.name.name})'  # Invalid
+        else:
+            assert False, 'Type -> ' + x.category
+    assert False, x
 
 
 def convert_cType_to_cppType(typ, annotation, arg, indent=0):
@@ -1086,8 +1125,6 @@ def make_base_render_params(metadata):
     c_prefix = metadata.c_prefix
 
     def as_cTypeEnumSpecialCase(typ):
-        if typ.category == 'bitmask':
-            return as_cType(c_prefix, typ.name) + 'Flags'
         return as_cType(c_prefix, typ.name)
 
     def as_cEnum(type_name, value_name):
@@ -1131,15 +1168,17 @@ def make_base_render_params(metadata):
             'as_CppMethodSuffix': as_CppMethodSuffix,
             'as_cProc': as_cProc,
             'as_cType': lambda name: as_cType(c_prefix, name),
-            'as_cReturnType': lambda typ: as_cReturnType(c_prefix, typ),
             'as_cppType': as_cppType,
             'as_jsEnumValue': as_jsEnumValue,
+            'has_wasmType': has_wasmType,
+            'as_wasmType': as_wasmType,
             'convert_cType_to_cppType': convert_cType_to_cppType,
             'as_varName': as_varName,
             'decorate': decorate,
             'as_ktName': as_ktName,
             'has_callbackInfoStruct': has_callbackInfoStruct,
             'find_by_name': find_by_name,
+            'print': print,
             'unreachable_code': unreachable_code
         }
 
@@ -1178,7 +1217,7 @@ class MultiGeneratorFromDawnJSON(Generator):
             'Comma-separated subset of targets to output. Available targets: '
             + ', '.join(allowed_targets))
 
-    def get_file_renders(self, args):
+    def get_outputs(self, args):
         with open(args.dawn_json) as f:
             loaded_json = json.loads(f.read())
 
@@ -1200,19 +1239,28 @@ class MultiGeneratorFromDawnJSON(Generator):
                 lpm_json = json.loads(f.read())
 
         renders = []
+        imported_templates = []
 
         params_dawn = parse_json(
             loaded_json,
             enabled_tags=['compat', 'dawn', 'native', 'deprecated'])
+
+        params_all = parse_json(loaded_json,
+                                enabled_tags=[
+                                    'compat', 'dawn', 'emscripten', 'native',
+                                    'deprecated'
+                                ])
+
         metadata = params_dawn['metadata']
         RENDER_PARAMS_BASE = make_base_render_params(metadata)
 
         api = metadata.api.lower()
         prefix = metadata.proc_table_prefix.lower()
         if 'headers' in targets:
+            imported_templates.append('BSD_LICENSE')
             renders.append(
                 FileRender('api.h', 'include/dawn/' + api + '.h',
-                           [RENDER_PARAMS_BASE, params_dawn]))
+                           [RENDER_PARAMS_BASE, params_all]))
             renders.append(
                 FileRender('dawn/wire/client/api.h',
                            'include/dawn/wire/client/' + api + '.h',
@@ -1223,9 +1271,13 @@ class MultiGeneratorFromDawnJSON(Generator):
                            [RENDER_PARAMS_BASE, params_dawn]))
 
         if 'cpp_headers' in targets:
+            imported_templates += [
+                "dawn/cpp_macros.tmpl",
+            ]
+
             renders.append(
                 FileRender('api_cpp.h', 'include/dawn/' + api + '_cpp.h', [
-                    RENDER_PARAMS_BASE, params_dawn, {
+                    RENDER_PARAMS_BASE, params_all, {
                         'c_header': api + '/' + api + '.h',
                         'c_namespace': None,
                     }
@@ -1271,42 +1323,55 @@ class MultiGeneratorFromDawnJSON(Generator):
                 loaded_json,
                 enabled_tags=['compat', 'upstream', 'native'],
                 disabled_tags=['dawn'])
+            imported_templates.append('BSD_LICENSE')
             renders.append(
                 FileRender('api.h', 'webgpu-headers/' + api + '.h',
                            [RENDER_PARAMS_BASE, params_upstream]))
 
-        if 'emscripten_bits' in targets:
+        if 'emdawnwebgpu_headers' in targets:
+            imported_templates += [
+                "dawn/cpp_macros.tmpl",
+            ]
+
             assert api == 'webgpu'
             params_emscripten = parse_json(
                 loaded_json, enabled_tags=['compat', 'emscripten'])
             # system/include/webgpu
+            imported_templates.append('BSD_LICENSE')
             renders.append(
-                FileRender('api.h',
-                           'emscripten-bits/system/include/webgpu/webgpu.h',
+                FileRender('api.h', 'src/emdawnwebgpu/include/webgpu/webgpu.h',
                            [RENDER_PARAMS_BASE, params_emscripten]))
             renders.append(
-                FileRender(
-                    'api_cpp.h',
-                    'emscripten-bits/system/include/webgpu/webgpu_cpp.h', [
-                        RENDER_PARAMS_BASE, params_emscripten, {
-                            'c_header': api + '/' + api + '.h',
-                            'c_namespace': None,
-                        }
-                    ]))
+                FileRender('api_cpp.h',
+                           'src/emdawnwebgpu/include/webgpu/webgpu_cpp.h', [
+                               RENDER_PARAMS_BASE, params_emscripten, {
+                                   'c_header': api + '/' + api + '.h',
+                                   'c_namespace': None,
+                               }
+                           ]))
             renders.append(
                 FileRender(
                     'api_cpp_chained_struct.h',
-                    'emscripten-bits/system/include/webgpu/webgpu_cpp_chained_struct.h',
+                    'src/emdawnwebgpu/include/webgpu/webgpu_cpp_chained_struct.h',
                     [RENDER_PARAMS_BASE, params_emscripten]))
-            # Snippets to paste into existing Emscripten files
+
+        if 'emdawnwebgpu_js' in targets:
+            assert api == 'webgpu'
+            params_emscripten = parse_json(
+                loaded_json, enabled_tags=['compat', 'emscripten'])
             renders.append(
-                FileRender('api_struct_info.json',
-                           'emscripten-bits/webgpu_struct_info.json',
+                FileRender('emdawnwebgpu/struct_info_webgpu.json',
+                           'src/emdawnwebgpu/struct_info_webgpu.json',
                            [RENDER_PARAMS_BASE, params_emscripten]))
             renders.append(
-                FileRender('library_api_enum_tables.js',
-                           'emscripten-bits/library_webgpu_enum_tables.js',
+                FileRender('emdawnwebgpu/library_webgpu_enum_tables.js',
+                           'src/emdawnwebgpu/library_webgpu_enum_tables.js',
                            [RENDER_PARAMS_BASE, params_emscripten]))
+            renders.append(
+                FileRender(
+                    'emdawnwebgpu/library_webgpu_generated_sig_info.js',
+                    'src/emdawnwebgpu/library_webgpu_generated_sig_info.js',
+                    [RENDER_PARAMS_BASE, params_emscripten]))
 
         if 'mock_api' in targets:
             mock_params = [
@@ -1332,6 +1397,10 @@ class MultiGeneratorFromDawnJSON(Generator):
                     'as_annotated_frontendType': \
                         lambda arg: annotated(as_frontendType(metadata, arg.type), arg),
                 }
+            ]
+
+            imported_templates += [
+                "dawn/cpp_macros.tmpl",
             ]
 
             impl_dir = metadata.impl_dir + '/' if metadata.impl_dir else ''
@@ -1533,15 +1602,22 @@ class MultiGeneratorFromDawnJSON(Generator):
             params_kotlin = compute_kotlin_params(loaded_json, kotlin_json)
             kt_file_path = params_kotlin['kotlin_package'].replace('.', '/')
             jni_name = params_kotlin['jni_name']
+
+            imported_templates += [
+                "art/api_kotlin_types.kt",
+            ]
+
             by_category = params_kotlin['by_category']
             for structure in by_category['structure']:
-                renders.append(
-                    FileRender('art/api_kotlin_structure.kt',
-                               'java/' + jni_name(structure) + '.kt', [
-                                   RENDER_PARAMS_BASE, params_kotlin, {
-                                       'structure': structure
-                                   }
-                               ]))
+                if (structure.name.get() != "string view"
+                        and structure.name.get() != "nullable string view"):
+                    renders.append(
+                        FileRender('art/api_kotlin_structure.kt',
+                                   'java/' + jni_name(structure) + '.kt', [
+                                       RENDER_PARAMS_BASE, params_kotlin, {
+                                           'structure': structure
+                                       }
+                                   ]))
             for obj in by_category['object']:
                 renders.append(
                     FileRender(
@@ -1566,15 +1642,6 @@ class MultiGeneratorFromDawnJSON(Generator):
                 FileRender('art/api_kotlin_async_helpers.kt',
                            'java/' + kt_file_path + '/AsyncHelpers.kt',
                            [RENDER_PARAMS_BASE, params_kotlin]))
-            renders.append(
-                FileRender('art/structures.h', 'cpp/structures.h',
-                           [RENDER_PARAMS_BASE, params_kotlin]))
-            renders.append(
-                FileRender('art/structures.cpp', 'cpp/structures.cpp',
-                           [RENDER_PARAMS_BASE, params_kotlin]))
-            renders.append(
-                FileRender('art/methods.cpp', 'cpp/methods.cpp',
-                           [RENDER_PARAMS_BASE, params_kotlin]))
 
             for enum in (params_kotlin['by_category']['bitmask'] +
                          params_kotlin['by_category']['enum']):
@@ -1591,7 +1658,26 @@ class MultiGeneratorFromDawnJSON(Generator):
                            'java/' + kt_file_path + '/Constants.kt',
                            [RENDER_PARAMS_BASE, params_kotlin]))
 
-        return renders
+        if "jni" in targets:
+            params_kotlin = compute_kotlin_params(loaded_json, kotlin_json)
+
+            imported_templates += [
+                "art/api_jni_types.kt",
+                "art/kotlin_record_conversion.cpp",
+            ]
+
+            renders.append(
+                FileRender('art/structures.h', 'cpp/structures.h',
+                           [RENDER_PARAMS_BASE, params_kotlin]))
+            renders.append(
+                FileRender('art/structures.cpp', 'cpp/structures.cpp',
+                           [RENDER_PARAMS_BASE, params_kotlin]))
+            renders.append(
+                FileRender('art/methods.cpp', 'cpp/methods.cpp',
+                           [RENDER_PARAMS_BASE, params_kotlin]))
+
+        return GeneratorOutput(renders=renders,
+                               imported_templates=imported_templates)
 
     def get_dependencies(self, args):
         deps = [os.path.abspath(args.dawn_json)]

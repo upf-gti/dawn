@@ -39,6 +39,7 @@
 #include "dawn/common/ContentLessObjectCache.h"
 #include "dawn/common/Mutex.h"
 #include "dawn/common/NonMovable.h"
+#include "dawn/common/RefCountedWithExternalCount.h"
 #include "dawn/common/StackAllocated.h"
 #include "dawn/native/CacheKey.h"
 #include "dawn/native/Commands.h"
@@ -53,7 +54,6 @@
 #include "dawn/native/Limits.h"
 #include "dawn/native/ObjectBase.h"
 #include "dawn/native/ObjectType_autogen.h"
-#include "dawn/native/RefCountedWithExternalCount.h"
 #include "dawn/native/Toggles.h"
 #include "dawn/native/UsageValidationMode.h"
 #include "partition_alloc/pointers/raw_ptr.h"
@@ -80,7 +80,7 @@ struct CallbackTask;
 struct InternalPipelineStore;
 struct ShaderModuleParseResult;
 
-class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
+class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCounted> {
   public:
     struct DeviceLostEvent final : public EventManager::TrackedEvent {
         // TODO(https://crbug.com/dawn/2465): Pass just the DeviceLostCallbackInfo when setters are
@@ -236,8 +236,9 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
                                                       SwapChainBase* previousSwapChain,
                                                       const SurfaceConfiguration* config);
     ResultOrError<Ref<TextureBase>> CreateTexture(const TextureDescriptor* rawDescriptor);
-    ResultOrError<Ref<TextureViewBase>> CreateTextureView(TextureBase* texture,
-                                                          const TextureViewDescriptor* descriptor);
+    ResultOrError<Ref<TextureViewBase>> CreateTextureView(
+        TextureBase* texture,
+        const TextureViewDescriptor* descriptor = nullptr);
 
     ResultOrError<wgpu::TextureUsage> GetSupportedSurfaceUsage(const Surface* surface) const;
 
@@ -278,7 +279,11 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     SamplerBase* APICreateSampler(const SamplerDescriptor* descriptor);
     ShaderModuleBase* APICreateShaderModule(const ShaderModuleDescriptor* descriptor);
     ShaderModuleBase* APICreateErrorShaderModule(const ShaderModuleDescriptor* descriptor,
-                                                 const char* errorMessage);
+                                                 const char* errorMessage) {
+        return APICreateErrorShaderModule2(descriptor, errorMessage);
+    }
+    ShaderModuleBase* APICreateErrorShaderModule2(const ShaderModuleDescriptor* descriptor,
+                                                  std::string_view errorMessage);
     // TODO(crbug.com/dawn/2320): Remove after deprecation.
     SwapChainBase* APICreateSwapChain(Surface* surface, const SwapChainDescriptor* descriptor);
     TextureBase* APICreateTexture(const TextureDescriptor* descriptor);
@@ -300,7 +305,11 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     wgpu::Status APIGetLimits(SupportedLimits* limits) const;
     bool APIHasFeature(wgpu::FeatureName feature) const;
     size_t APIEnumerateFeatures(wgpu::FeatureName* features) const;
-    void APIInjectError(wgpu::ErrorType type, const char* message);
+    void APIInjectError(wgpu::ErrorType type, const char* message) {
+        // TODO(crbug.com/42241188): Remove const char* version of the method.
+        APIInjectError2(type, message);
+    }
+    void APIInjectError2(wgpu::ErrorType type, std::string_view message);
     bool APITick();
     void APIValidateTextureDescriptor(const TextureDescriptor* desc);
 
@@ -370,7 +379,11 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     void EmitLog(const char* message);
     void EmitLog(WGPULoggingType loggingType, const char* message);
     void EmitCompilationLog(const ShaderModuleBase* module);
-    void APIForceLoss(wgpu::DeviceLostReason reason, const char* message);
+    void APIForceLoss(wgpu::DeviceLostReason reason, const char* message) {
+        // TODO(crbug.com/42241188): Remove const char* version of the method.
+        return APIForceLoss2(reason, message);
+    }
+    void APIForceLoss2(wgpu::DeviceLostReason reason, std::string_view message);
     QueueBase* GetQueue() const;
 
     friend class IgnoreLazyClearCountScope;
@@ -403,6 +416,9 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
     // will be resolved into.
     virtual bool CanTextureLoadResolveTargetInTheSameRenderpass() const;
 
+    // Whether the backend prefer not using mappable/uniform buffer as storage buffer.
+    virtual bool PreferNotUsingMappableOrUniformBufferAsStorage() const;
+
     bool HasFeature(Feature feature) const;
 
     const CombinedLimits& GetLimits() const;
@@ -415,7 +431,9 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount {
 
     const CacheKey& GetCacheKey() const;
     const std::string& GetLabel() const;
+    // TODO(crbug.com/42241188): Remove const char* version of the method.
     void APISetLabel(const char* label);
+    void APISetLabel2(std::optional<std::string_view> label);
     void APIDestroy();
 
     virtual void AppendDebugLayerMessages(ErrorData* error) {}

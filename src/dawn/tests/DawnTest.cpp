@@ -458,10 +458,10 @@ void DawnTestEnvironment::SelectPreferredAdapterProperties(const native::Instanc
                 adapterOptions.compatibilityMode = compatibilityMode;
                 for (const native::Adapter& adapter :
                      instance->EnumerateAdapters(&adapterOptions)) {
-                    wgpu::AdapterProperties properties;
-                    adapter.GetProperties(&properties);
+                    wgpu::AdapterInfo info;
+                    adapter.GetInfo(&info);
 
-                    if (properties.adapterType == devicePreference) {
+                    if (info.adapterType == devicePreference) {
                         // Found a matching preferred device type. Return to break out of all loops.
                         preferredDeviceType = devicePreference;
                         return;
@@ -476,15 +476,14 @@ void DawnTestEnvironment::SelectPreferredAdapterProperties(const native::Instanc
         wgpu::RequestAdapterOptions adapterOptions;
         adapterOptions.compatibilityMode = compatibilityMode;
         for (const native::Adapter& adapter : instance->EnumerateAdapters(&adapterOptions)) {
-            wgpu::AdapterProperties properties;
-            adapter.GetProperties(&properties);
+            wgpu::AdapterInfo info;
+            adapter.GetInfo(&info);
 
             // Skip non-OpenGLES compat adapters. Metal/Vulkan/D3D12 support
             // core WebGPU.
             // D3D11 is in an experimental state where it may support core.
             // See crbug.com/dawn/1820 for determining d3d11 capabilities.
-            if (properties.compatibilityMode &&
-                properties.backendType != wgpu::BackendType::OpenGLES) {
+            if (info.compatibilityMode && info.backendType != wgpu::BackendType::OpenGLES) {
                 continue;
             }
 
@@ -494,11 +493,11 @@ void DawnTestEnvironment::SelectPreferredAdapterProperties(const native::Instanc
             // The adapter is deselected if:
             if (mHasBackendTypeFilter) {
                 // It doesn't match the backend type, if present.
-                selected &= properties.backendType == mBackendTypeFilter;
+                selected &= info.backendType == mBackendTypeFilter;
             }
             if (mHasVendorIdFilter) {
                 // It doesn't match the vendor id, if present.
-                selected &= mVendorIdFilter == properties.vendorID;
+                selected &= mVendorIdFilter == info.vendorID;
 
                 if (!mDevicePreferences.empty()) {
                     WarningLog() << "Vendor ID filter provided. Ignoring device type preference.";
@@ -509,29 +508,29 @@ void DawnTestEnvironment::SelectPreferredAdapterProperties(const native::Instanc
                 selected &=
                     // The device type doesn't match the first available preferred type for that
                     // backend, if present.
-                    (properties.adapterType == *preferredDeviceType) ||
+                    (info.adapterType == *preferredDeviceType) ||
                     // Always select Unknown OpenGL adapters if we don't want a CPU adapter.
                     // OpenGL will usually be unknown because we can't query the device type.
                     // If we ever have Swiftshader GL (unlikely), we could set the DeviceType
                     // properly.
                     (*preferredDeviceType != wgpu::AdapterType::CPU &&
-                     properties.adapterType == wgpu::AdapterType::Unknown &&
-                     (properties.backendType == wgpu::BackendType::OpenGL ||
-                      properties.backendType == wgpu::BackendType::OpenGLES)) ||
+                     info.adapterType == wgpu::AdapterType::Unknown &&
+                     (info.backendType == wgpu::BackendType::OpenGL ||
+                      info.backendType == wgpu::BackendType::OpenGLES)) ||
                     // Always select the Null backend. There are few tests on this backend, and they
                     // run quickly. This is temporary as to not lose coverage. We can group it with
                     // Swiftshader as a CPU adapter when we have Swiftshader tests.
-                    (properties.backendType == wgpu::BackendType::Null);
+                    (info.backendType == wgpu::BackendType::Null);
             }
 
             // In Windows Remote Desktop sessions we may be able to discover multiple adapters that
             // have the same name and backend type. We will just choose one adapter from them in our
             // tests.
-            const auto adapterTypeAndName = std::tuple(
-                properties.backendType, std::string(properties.name), properties.compatibilityMode);
+            const auto adapterTypeAndName =
+                std::tuple(info.backendType, std::string(info.device), info.compatibilityMode);
             if (adapterNameSet.find(adapterTypeAndName) == adapterNameSet.end()) {
                 adapterNameSet.insert(adapterTypeAndName);
-                mAdapterProperties.emplace_back(properties, selected);
+                mAdapterProperties.emplace_back(info, selected);
             }
         }
     }
@@ -745,15 +744,15 @@ DawnTestBase::DawnTestBase(const AdapterTestParam& param) : mParam(param) {
         const auto& adapters = gTestEnv->GetInstance()->EnumerateAdapters(&adapterOptions);
         const auto& it =
             std::find_if(adapters.begin(), adapters.end(), [&](const native::Adapter& candidate) {
-                wgpu::AdapterProperties properties;
-                candidate.GetProperties(&properties);
+                wgpu::AdapterInfo info;
+                candidate.GetInfo(&info);
 
                 const auto& param = gCurrentTest->mParam;
                 return (param.adapterProperties.selected &&
-                        properties.deviceID == param.adapterProperties.deviceID &&
-                        properties.vendorID == param.adapterProperties.vendorID &&
-                        properties.adapterType == param.adapterProperties.adapterType &&
-                        strcmp(properties.name, param.adapterProperties.name.c_str()) == 0);
+                        info.deviceID == param.adapterProperties.deviceID &&
+                        info.vendorID == param.adapterProperties.vendorID &&
+                        info.adapterType == param.adapterProperties.adapterType &&
+                        strcmp(info.device, param.adapterProperties.name.c_str()) == 0);
             });
         DAWN_ASSERT(it != adapters.end());
         gCurrentTest->mBackendAdapter = *it;
@@ -1105,6 +1104,23 @@ void* DawnTestBase::GetUniqueUserdata() {
     return reinterpret_cast<void*>(++mNextUniqueUserdata);
 }
 
+uint32_t DawnTestBase::GetDeviceCreationDeprecationWarningExpectation(
+    const wgpu::DeviceDescriptor& descriptor) {
+    uint32_t expectedDeprecatedCount = 0;
+
+    std::unordered_set<wgpu::FeatureName> requiredFeatureSet;
+    for (uint32_t i = 0; i < descriptor.requiredFeatureCount; ++i) {
+        requiredFeatureSet.insert(descriptor.requiredFeatures[i]);
+    }
+    // ChromiumExperimentalSubgroups feature is deprecated.
+    // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
+    if (requiredFeatureSet.count(wgpu::FeatureName::ChromiumExperimentalSubgroups)) {
+        expectedDeprecatedCount++;
+    }
+
+    return expectedDeprecatedCount;
+}
+
 WGPUDevice DawnTestBase::CreateDeviceImpl(std::string isolationKey,
                                           const WGPUDeviceDescriptor* descriptor) {
     // Create the device from the adapter
@@ -1132,7 +1148,23 @@ WGPUDevice DawnTestBase::CreateDeviceImpl(std::string isolationKey,
     ParamTogglesHelper deviceTogglesHelper(mParam, native::ToggleStage::Device);
     cacheDesc.nextInChain = &deviceTogglesHelper.togglesDesc;
 
-    return mBackendAdapter.CreateDevice(&deviceDescriptor);
+    WGPUDevice createdDevice;
+    uint32_t deviceCreationDeprecatedWarningExpectation =
+        GetDeviceCreationDeprecationWarningExpectation(deviceDescriptor);
+    // Check and update the deprecation warning count for creating device.
+    // The same as EXPECT_DEPRECATION_WARNINGS, but without checking
+    // SkipValidation toggle.
+    if (UsesWire()) {
+        createdDevice = mBackendAdapter.CreateDevice(&deviceDescriptor);
+    } else {
+        uint64_t warningsBefore = GetDeprecationWarningCountForTesting();
+        createdDevice = mBackendAdapter.CreateDevice(&deviceDescriptor);
+        uint64_t warningsAfter = GetDeprecationWarningCountForTesting();
+        EXPECT_EQ(mLastWarningCount, warningsBefore);
+        EXPECT_EQ(warningsAfter, warningsBefore + deviceCreationDeprecatedWarningExpectation);
+        mLastWarningCount = warningsAfter;
+    }
+    return createdDevice;
 }
 
 wgpu::Device DawnTestBase::CreateDevice(std::string isolationKey) {

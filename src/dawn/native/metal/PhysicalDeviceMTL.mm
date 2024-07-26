@@ -190,7 +190,7 @@ MaybeError GetDevicePCIInfo(id<MTLDevice>, PCIIDs* ids) {
 
 bool IsGPUCounterSupported(id<MTLDevice> device,
                            MTLCommonCounterSet counterSetName,
-                           std::vector<MTLCommonCounter> counterNames)
+                           std::vector<NSString*> counterNames)
     API_AVAILABLE(macos(10.15), ios(14.0)) {
     id<MTLCounterSet> counterSet = nil;
     for (id<MTLCounterSet> set in [device counterSets]) {
@@ -726,6 +726,9 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     if (@available(macOS 10.15, iOS 13.0, *)) {
         if ([*mDevice supportsFamily:MTLGPUFamilyApple6] ||
             [*mDevice supportsFamily:MTLGPUFamilyMac2]) {
+            EnableFeature(Feature::Subgroups);
+            EnableFeature(Feature::SubgroupsF16);
+            // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
             EnableFeature(Feature::ChromiumExperimentalSubgroups);
         }
     }

@@ -260,7 +260,10 @@ struct Decoder {
             }
         }
         if (fn_in.has_return_location()) {
-            fn_out->SetReturnLocation(Location(fn_in.return_location()));
+            fn_out->SetReturnLocation(fn_in.return_location());
+        }
+        if (fn_in.has_return_interpolation()) {
+            fn_out->SetReturnInterpolation(Interpolation(fn_in.return_interpolation()));
         }
         if (fn_in.has_return_builtin()) {
             fn_out->SetReturnBuiltin(BuiltinValue(fn_in.return_builtin()));
@@ -763,7 +766,7 @@ struct Decoder {
                 Error() << "struct member must have non-zero size";
                 size = 1;
             }
-            core::type::StructMemberAttributes attributes_out{};
+            core::IOAttributes attributes_out{};
             if (member_in.has_attributes()) {
                 auto& attributes_in = member_in.attributes();
                 if (attributes_in.has_location()) {
@@ -939,7 +942,13 @@ struct Decoder {
                 param_out->SetBindingPoint(bp_in.group(), bp_in.binding());
             }
             if (attrs_in.has_location()) {
-                param_out->SetLocation(Location(attrs_in.location()));
+                param_out->SetLocation(attrs_in.location());
+            }
+            if (attrs_in.has_color()) {
+                param_out->SetColor(attrs_in.color());
+            }
+            if (attrs_in.has_interpolation()) {
+                param_out->SetInterpolation(Interpolation(attrs_in.interpolation()));
             }
             if (attrs_in.has_builtin()) {
                 param_out->SetBuiltin(BuiltinValue(attrs_in.builtin()));
@@ -1077,15 +1086,6 @@ struct Decoder {
     ////////////////////////////////////////////////////////////////////////////
     // Attributes
     ////////////////////////////////////////////////////////////////////////////
-    ir::Location Location(const pb::Location& location_in) {
-        core::ir::Location location_out{};
-        location_out.value = location_in.value();
-        if (location_in.has_interpolation()) {
-            location_out.interpolation = Interpolation(location_in.interpolation());
-        }
-        return location_out;
-    }
-
     core::Interpolation Interpolation(const pb::Interpolation& interpolation_in) {
         core::Interpolation interpolation_out{};
         interpolation_out.type = InterpolationType(interpolation_in.type());
@@ -1315,6 +1315,10 @@ struct Decoder {
                 return core::InterpolationSampling::kCentroid;
             case pb::InterpolationSampling::sample:
                 return core::InterpolationSampling::kSample;
+            case pb::InterpolationSampling::first:
+                return core::InterpolationSampling::kFirst;
+            case pb::InterpolationSampling::either:
+                return core::InterpolationSampling::kEither;
 
             case pb::InterpolationSampling::InterpolationSampling_INT_MIN_SENTINEL_DO_NOT_USE_:
             case pb::InterpolationSampling::InterpolationSampling_INT_MAX_SENTINEL_DO_NOT_USE_:

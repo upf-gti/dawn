@@ -73,10 +73,11 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_NonStruct) {
     position->SetBuiltin(core::BuiltinValue::kPosition);
     position->SetInvariant(true);
     auto* color1 = b.FunctionParam("color1", ty.f32());
-    color1->SetLocation(0, {});
+    color1->SetLocation(0);
     auto* color2 = b.FunctionParam("color2", ty.f32());
-    color2->SetLocation(1, core::Interpolation{core::InterpolationType::kLinear,
-                                               core::InterpolationSampling::kSample});
+    color2->SetLocation(1);
+    color2->SetInterpolation(core::Interpolation{core::InterpolationType::kLinear,
+                                                 core::InterpolationSampling::kSample});
 
     ep->SetParams({front_facing, position, color1, color2});
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
@@ -146,7 +147,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("front_facing"),
                                      ty.bool_(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -158,7 +159,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -170,7 +171,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -182,7 +183,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("color2"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 1u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -293,7 +294,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Mixed) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -305,7 +306,7 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Mixed) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -321,8 +322,9 @@ TEST_F(MslWriter_ShaderIOTest, Parameters_Mixed) {
     front_facing->SetBuiltin(core::BuiltinValue::kFrontFacing);
     auto* str_param = b.FunctionParam("inputs", str_ty);
     auto* color2 = b.FunctionParam("color2", ty.f32());
-    color2->SetLocation(1, core::Interpolation{core::InterpolationType::kLinear,
-                                               core::InterpolationSampling::kSample});
+    color2->SetLocation(1);
+    color2->SetInterpolation(core::Interpolation{core::InterpolationType::kLinear,
+                                                 core::InterpolationSampling::kSample});
 
     ep->SetParams({front_facing, str_param, color2});
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
@@ -451,7 +453,7 @@ foo_outputs = struct @align(16) {
 
 TEST_F(MslWriter_ShaderIOTest, ReturnValue_NonStructLocation) {
     auto* ep = b.Function("foo", ty.vec4<f32>());
-    ep->SetReturnLocation(1u, {});
+    ep->SetReturnLocation(1u);
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
 
     b.Append(ep->Block(), [&] {  //
@@ -500,7 +502,7 @@ TEST_F(MslWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -512,7 +514,7 @@ TEST_F(MslWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -524,7 +526,7 @@ TEST_F(MslWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("color2"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 1u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -607,7 +609,7 @@ TEST_F(MslWriter_ShaderIOTest, ReturnValue_DualSourceBlending) {
                                                  {
                                                      mod.symbols.New("color1"),
                                                      ty.f32(),
-                                                     core::type::StructMemberAttributes{
+                                                     core::IOAttributes{
                                                          /* location */ 0u,
                                                          /* blend_src */ 0u,
                                                          /* color */ std::nullopt,
@@ -619,7 +621,7 @@ TEST_F(MslWriter_ShaderIOTest, ReturnValue_DualSourceBlending) {
                                                  {
                                                      mod.symbols.New("color2"),
                                                      ty.f32(),
-                                                     core::type::StructMemberAttributes{
+                                                     core::IOAttributes{
                                                          /* location */ 0u,
                                                          /* blend_src */ 1u,
                                                          /* color */ std::nullopt,
@@ -693,7 +695,7 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
                                  {
                                      mod.symbols.New("position"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -705,7 +707,7 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
                                  {
                                      mod.symbols.New("color"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -734,7 +736,7 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
         auto* inputs = b.FunctionParam("inputs", str_ty);
         ep->SetStage(core::ir::Function::PipelineStage::kFragment);
         ep->SetParams({inputs});
-        ep->SetReturnLocation(0u, {});
+        ep->SetReturnLocation(0u);
 
         b.Append(ep->Block(), [&] {  //
             auto* position = b.Access(vec4f, inputs, 0_u);
@@ -836,7 +838,7 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                  {
                                      mod.symbols.New("position"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -848,7 +850,7 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                  {
                                      mod.symbols.New("color"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -858,8 +860,10 @@ TEST_F(MslWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                      },
                                  },
                              });
+    auto* var = b.Var(ty.ptr(storage, str_ty, read));
+    var->SetBindingPoint(0, 0);
 
-    auto* buffer = mod.root_block->Append(b.Var(ty.ptr(storage, str_ty, read)));
+    auto* buffer = mod.root_block->Append(var);
 
     auto* ep = b.Function("vert", str_ty);
     ep->SetStage(core::ir::Function::PipelineStage::kVertex);
@@ -875,7 +879,7 @@ Outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
 }
 
 %vert = @vertex func():Outputs {
@@ -899,7 +903,7 @@ vert_outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
 }
 
 %vert_inner = func():Outputs {
@@ -933,7 +937,7 @@ TEST_F(MslWriter_ShaderIOTest, StructWithAttributes_NotUsedForInterface) {
                                  {
                                      mod.symbols.New("position"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -945,7 +949,7 @@ TEST_F(MslWriter_ShaderIOTest, StructWithAttributes_NotUsedForInterface) {
                                  {
                                      mod.symbols.New("color"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -956,7 +960,10 @@ TEST_F(MslWriter_ShaderIOTest, StructWithAttributes_NotUsedForInterface) {
                                  },
                              });
 
-    auto* buffer = mod.root_block->Append(b.Var(ty.ptr(storage, str_ty, read)));
+    auto* var = b.Var(ty.ptr(storage, str_ty, read));
+    var->SetBindingPoint(0, 0);
+
+    auto* buffer = mod.root_block->Append(var);
 
     auto* ep = b.Function("frag", ty.void_());
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
@@ -973,7 +980,7 @@ Outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
 }
 
 %frag = @fragment func():void {
@@ -993,7 +1000,7 @@ Outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
 }
 
 %frag = @fragment func():void {
@@ -1053,6 +1060,153 @@ foo_outputs = struct @align(16) {
 
     ShaderIOConfig config;
     config.emit_vertex_point_size = true;
+    Run(ShaderIO, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(MslWriter_ShaderIOTest, Color_NonStruct) {
+    auto* ep = b.Function("foo", ty.void_());
+    auto* color1 = b.FunctionParam("color1", ty.f32());
+    color1->SetColor(1);
+    auto* color2 = b.FunctionParam("color2", ty.f32());
+    color2->SetColor(2);
+
+    ep->SetParams({color1, color2});
+    ep->SetStage(core::ir::Function::PipelineStage::kFragment);
+
+    b.Append(ep->Block(), [&] {
+        b.Add<f32>(color1, color2);
+        b.Return(ep);
+    });
+
+    auto* src = R"(
+%foo = @fragment func(%color1:f32 [@color(1)], %color2:f32 [@color(2)]):void {
+  $B1: {
+    %4:f32 = add %color1, %color2
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+foo_inputs = struct @align(4) {
+  color1:f32 @offset(0), @color(1)
+  color2:f32 @offset(4), @color(2)
+}
+
+%foo_inner = func(%color1:f32, %color2:f32):void {
+  $B1: {
+    %4:f32 = add %color1, %color2
+    ret
+  }
+}
+%foo = @fragment func(%inputs:foo_inputs):void {
+  $B2: {
+    %7:f32 = access %inputs, 0u
+    %8:f32 = access %inputs, 1u
+    %9:void = call %foo_inner, %7, %8
+    ret
+  }
+}
+)";
+
+    ShaderIOConfig config;
+    Run(ShaderIO, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(MslWriter_ShaderIOTest, Color_Struct) {
+    auto* str_ty =
+        ty.Struct(mod.symbols.New("Inputs"), {
+                                                 {
+                                                     mod.symbols.New("color1"),
+                                                     ty.f32(),
+                                                     core::IOAttributes{
+                                                         /* location */ std::nullopt,
+                                                         /* blend_src */ std::nullopt,
+                                                         /* color */ 1u,
+                                                         /* builtin */ std::nullopt,
+                                                         /* interpolation */ std::nullopt,
+                                                         /* invariant */ false,
+                                                     },
+                                                 },
+                                                 {
+                                                     mod.symbols.New("color2"),
+                                                     ty.f32(),
+                                                     core::IOAttributes{
+                                                         /* location */ std::nullopt,
+                                                         /* blend_src */ std::nullopt,
+                                                         /* color */ 2u,
+                                                         /* builtin */ std::nullopt,
+                                                         /* interpolation */ std::nullopt,
+                                                         /* invariant */ false,
+                                                     },
+                                                 },
+                                             });
+
+    auto* ep = b.Function("foo", ty.void_());
+    auto* str_param = b.FunctionParam("inputs", str_ty);
+    ep->SetParams({str_param});
+    ep->SetStage(core::ir::Function::PipelineStage::kFragment);
+
+    b.Append(ep->Block(), [&] {
+        auto* color1 = b.Access<f32>(str_param, 0_i);
+        auto* color2 = b.Access<f32>(str_param, 1_i);
+        b.Add<f32>(color1, color2);
+        b.Return(ep);
+    });
+
+    auto* src = R"(
+Inputs = struct @align(4) {
+  color1:f32 @offset(0), @color(1)
+  color2:f32 @offset(4), @color(2)
+}
+
+%foo = @fragment func(%inputs:Inputs):void {
+  $B1: {
+    %3:f32 = access %inputs, 0i
+    %4:f32 = access %inputs, 1i
+    %5:f32 = add %3, %4
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+Inputs = struct @align(4) {
+  color1:f32 @offset(0)
+  color2:f32 @offset(4)
+}
+
+foo_inputs = struct @align(4) {
+  Inputs_color1:f32 @offset(0), @color(1)
+  Inputs_color2:f32 @offset(4), @color(2)
+}
+
+%foo_inner = func(%inputs:Inputs):void {
+  $B1: {
+    %3:f32 = access %inputs, 0i
+    %4:f32 = access %inputs, 1i
+    %5:f32 = add %3, %4
+    ret
+  }
+}
+%foo = @fragment func(%inputs_1:foo_inputs):void {  # %inputs_1: 'inputs'
+  $B2: {
+    %8:f32 = access %inputs_1, 0u
+    %9:f32 = access %inputs_1, 1u
+    %10:Inputs = construct %8, %9
+    %11:void = call %foo_inner, %10
+    ret
+  }
+}
+)";
+
+    ShaderIOConfig config;
     Run(ShaderIO, config);
 
     EXPECT_EQ(expect, str());

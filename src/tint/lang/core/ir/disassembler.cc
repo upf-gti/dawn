@@ -212,22 +212,23 @@ void Disassembler::EmitBindingPoint(BindingPoint p) {
          << StyleLiteral(p.binding) << ")";
 }
 
-void Disassembler::EmitLocation(Location loc) {
-    out_ << StyleAttribute("@location") << "(" << loc.value << ")";
-    if (loc.interpolation.has_value()) {
-        out_ << ", " << StyleAttribute("@interpolate") << "(";
-        out_ << StyleEnum(loc.interpolation->type);
-        if (loc.interpolation->sampling != core::InterpolationSampling::kUndefined) {
-            out_ << ", ";
-            out_ << StyleEnum(loc.interpolation->sampling);
-        }
-        out_ << ")";
+void Disassembler::EmitInputAttachmentIndex(uint32_t i) {
+    out_ << StyleAttribute("@input_attachment_index") << "(" << StyleLiteral(i) << ")";
+}
+
+void Disassembler::EmitInterpolation(Interpolation interp) {
+    out_ << StyleAttribute("@interpolate") << "(";
+    out_ << StyleEnum(interp.type);
+    if (interp.sampling != core::InterpolationSampling::kUndefined) {
+        out_ << ", ";
+        out_ << StyleEnum(interp.sampling);
     }
+    out_ << ")";
 }
 
 void Disassembler::EmitParamAttributes(const FunctionParam* p) {
-    if (!p->Invariant() && !p->Location().has_value() && !p->BindingPoint().has_value() &&
-        !p->Builtin().has_value()) {
+    if (!p->Invariant() && !p->Location().has_value() && !p->Color().has_value() &&
+        !p->BindingPoint().has_value() && !p->Builtin().has_value()) {
         return;
     }
 
@@ -246,7 +247,18 @@ void Disassembler::EmitParamAttributes(const FunctionParam* p) {
         need_comma = true;
     }
     if (p->Location().has_value()) {
-        EmitLocation(p->Location().value());
+        comma();
+        out_ << StyleAttribute("@location") << "(" << p->Location().value() << ")";
+        need_comma = true;
+    }
+    if (p->Color().has_value()) {
+        comma();
+        out_ << StyleAttribute("@color") << "(" << p->Color().value() << ")";
+        need_comma = true;
+    }
+    if (p->Interpolation().has_value()) {
+        comma();
+        EmitInterpolation(p->Interpolation().value());
         need_comma = true;
     }
     if (p->BindingPoint().has_value()) {
@@ -283,7 +295,12 @@ void Disassembler::EmitReturnAttributes(const Function* func) {
     }
     if (func->ReturnLocation().has_value()) {
         comma();
-        EmitLocation(func->ReturnLocation().value());
+        out_ << StyleAttribute("@location") << "(" << func->ReturnLocation().value() << ")";
+        need_comma = true;
+    }
+    if (func->ReturnInterpolation().has_value()) {
+        comma();
+        EmitInterpolation(func->ReturnInterpolation().value());
         need_comma = true;
     }
     if (func->ReturnBuiltin().has_value()) {
@@ -371,7 +388,12 @@ void Disassembler::EmitValueWithType(const Instruction* val) {
 void Disassembler::EmitValueWithType(const Value* val) {
     EmitValue(val);
     if (val) {
-        out_ << ":" << StyleType(val->Type()->FriendlyName());
+        out_ << ":";
+        if (val->Type()) {
+            out_ << StyleType(val->Type()->FriendlyName());
+        } else {
+            out_ << StyleType("null");
+        }
     }
 }
 
@@ -495,6 +517,12 @@ void Disassembler::EmitInstruction(const Instruction* inst) {
                 out_ << " ";
                 EmitBindingPoint(v->BindingPoint().value());
             }
+
+            if (v->InputAttachmentIndex().has_value()) {
+                out_ << " ";
+                EmitInputAttachmentIndex(v->InputAttachmentIndex().value());
+            }
+
             if (v->Attributes().invariant) {
                 out_ << " " << StyleAttribute("@invariant");
             }
@@ -872,6 +900,10 @@ void Disassembler::EmitStructDecl(const core::type::Struct* str) {
         if (member->Attributes().location.has_value()) {
             out_ << ", " << StyleAttribute("@location") << "("
                  << StyleLiteral(member->Attributes().location.value()) << ")";
+        }
+        if (member->Attributes().color.has_value()) {
+            out_ << ", " << StyleAttribute("@color") << "("
+                 << StyleLiteral(member->Attributes().color.value()) << ")";
         }
         if (member->Attributes().interpolation.has_value()) {
             auto& interp = member->Attributes().interpolation.value();

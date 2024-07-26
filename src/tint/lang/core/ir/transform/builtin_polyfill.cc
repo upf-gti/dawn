@@ -27,8 +27,6 @@
 
 #include "src/tint/lang/core/ir/transform/builtin_polyfill.h"
 
-#include <utility>
-
 #include "src/tint/lang/core/ir/builder.h"
 #include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/core/ir/validator.h"
@@ -227,31 +225,6 @@ struct State {
         }
     }
 
-    /// Return a type with element type @p type that has the same number of vector components as
-    /// @p match. If @p match is scalar just return @p type.
-    /// @param el_ty the type to extend
-    /// @param match the type to match the component count of
-    /// @returns a type with the same number of vector components as @p match
-    const core::type::Type* MatchWidth(const core::type::Type* el_ty,
-                                       const core::type::Type* match) {
-        if (auto* vec = match->As<core::type::Vector>()) {
-            return ty.vec(el_ty, vec->Width());
-        }
-        return el_ty;
-    }
-
-    /// Return a constant that has the same number of vector components as @p match, each with the
-    /// value @p element. If @p match is scalar just return @p element.
-    /// @param element the value to extend
-    /// @param match the type to match the component count of
-    /// @returns a value with the same number of vector components as @p match
-    ir::Constant* MatchWidth(ir::Constant* element, const core::type::Type* match) {
-        if (match->Is<core::type::Vector>()) {
-            return b.Splat(MatchWidth(element->Type(), match), element);
-        }
-        return element;
-    }
-
     /// Polyfill a `clamp()` builtin call for integers.
     /// @param call the builtin call instruction
     void ClampInt(ir::CoreBuiltinCall* call) {
@@ -272,11 +245,11 @@ struct State {
     void CountLeadingZeros(ir::CoreBuiltinCall* call) {
         auto* input = call->Args()[0];
         auto* result_ty = input->Type();
-        auto* uint_ty = MatchWidth(ty.u32(), result_ty);
-        auto* bool_ty = MatchWidth(ty.bool_(), result_ty);
+        auto* uint_ty = ty.match_width(ty.u32(), result_ty);
+        auto* bool_ty = ty.match_width(ty.bool_(), result_ty);
 
         // Make an u32 constant with the same component count as result_ty.
-        auto V = [&](uint32_t u) { return MatchWidth(b.Constant(u32(u)), result_ty); };
+        auto V = [&](uint32_t u) { return b.MatchWidth(u32(u), result_ty); };
 
         b.InsertBefore(call, [&] {
             // %x = %input;
@@ -334,11 +307,11 @@ struct State {
     void CountTrailingZeros(ir::CoreBuiltinCall* call) {
         auto* input = call->Args()[0];
         auto* result_ty = input->Type();
-        auto* uint_ty = MatchWidth(ty.u32(), result_ty);
-        auto* bool_ty = MatchWidth(ty.bool_(), result_ty);
+        auto* uint_ty = ty.match_width(ty.u32(), result_ty);
+        auto* bool_ty = ty.match_width(ty.bool_(), result_ty);
 
         // Make an u32 constant with the same component count as result_ty.
-        auto V = [&](uint32_t u) { return MatchWidth(b.Constant(u32(u)), result_ty); };
+        auto V = [&](uint32_t u) { return b.MatchWidth(u32(u), result_ty); };
 
         b.InsertBefore(call, [&] {
             // %x = %input;
@@ -440,11 +413,11 @@ struct State {
     void FirstLeadingBit(ir::CoreBuiltinCall* call) {
         auto* input = call->Args()[0];
         auto* result_ty = input->Type();
-        auto* uint_ty = MatchWidth(ty.u32(), result_ty);
-        auto* bool_ty = MatchWidth(ty.bool_(), result_ty);
+        auto* uint_ty = ty.match_width(ty.u32(), result_ty);
+        auto* bool_ty = ty.match_width(ty.bool_(), result_ty);
 
         // Make an u32 constant with the same component count as result_ty.
-        auto V = [&](uint32_t u) { return MatchWidth(b.Constant(u32(u)), result_ty); };
+        auto V = [&](uint32_t u) { return b.MatchWidth(u32(u), result_ty); };
 
         b.InsertBefore(call, [&] {
             // %x = %input;
@@ -502,11 +475,11 @@ struct State {
     void FirstTrailingBit(ir::CoreBuiltinCall* call) {
         auto* input = call->Args()[0];
         auto* result_ty = input->Type();
-        auto* uint_ty = MatchWidth(ty.u32(), result_ty);
-        auto* bool_ty = MatchWidth(ty.bool_(), result_ty);
+        auto* uint_ty = ty.match_width(ty.u32(), result_ty);
+        auto* bool_ty = ty.match_width(ty.bool_(), result_ty);
 
         // Make an u32 constant with the same component count as result_ty.
-        auto V = [&](uint32_t u) { return MatchWidth(b.Constant(u32(u)), result_ty); };
+        auto V = [&](uint32_t u) { return b.MatchWidth(u32(u), result_ty); };
 
         b.InsertBefore(call, [&] {
             // %x = %input;
@@ -609,11 +582,11 @@ struct State {
         ir::Constant* zero = nullptr;
         ir::Constant* one = nullptr;
         if (type->DeepestElement()->Is<core::type::F32>()) {
-            zero = MatchWidth(b.Constant(0_f), type);
-            one = MatchWidth(b.Constant(1_f), type);
+            zero = b.MatchWidth(0_f, type);
+            one = b.MatchWidth(1_f, type);
         } else if (type->DeepestElement()->Is<core::type::F16>()) {
-            zero = MatchWidth(b.Constant(0_h), type);
-            one = MatchWidth(b.Constant(1_h), type);
+            zero = b.MatchWidth(0_h, type);
+            one = b.MatchWidth(1_h, type);
         }
         auto* clamp = b.CallWithResult(call->DetachResult(), core::BuiltinFn::kClamp,
                                        Vector{call->Args()[0], zero, one});

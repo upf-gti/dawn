@@ -126,9 +126,33 @@ WireResult Server::InjectSwapChain(WGPUSwapChain swapchain,
     data->generation = handle.generation;
     data->state = AllocationState::Allocated;
 
-    // The texture is externally owned so it shouldn't be destroyed when we receive a destroy
+    // The swapchain is externally owned so it shouldn't be destroyed when we receive a destroy
     // message from the client. Add a reference to counterbalance the eventual release.
     mProcs.swapChainAddRef(swapchain);
+
+    return WireResult::Success;
+}
+
+WireResult Server::InjectSurface(WGPUSurface surface,
+                                 const Handle& handle,
+                                 const Handle& instanceHandle) {
+    DAWN_ASSERT(surface != nullptr);
+    Known<WGPUInstance> instance;
+    WIRE_TRY(Objects<WGPUInstance>().Get(instanceHandle.id, &instance));
+    if (instance->generation != instanceHandle.generation) {
+        return WireResult::FatalError;
+    }
+
+    Reserved<WGPUSurface> data;
+    WIRE_TRY(Objects<WGPUSurface>().Allocate(&data, handle));
+
+    data->handle = surface;
+    data->generation = handle.generation;
+    data->state = AllocationState::Allocated;
+
+    // The surface is externally owned so it shouldn't be destroyed when we receive a destroy
+    // message from the client. Add a reference to counterbalance the eventual release.
+    mProcs.surfaceAddRef(surface);
 
     return WireResult::Success;
 }
@@ -167,7 +191,7 @@ void Server::SetForwardingDeviceCallbacks(Known<WGPUDevice> device) {
     // free their userdata. Also unlike other callbacks, these are cleared and unset when
     // the server is destroyed, so we don't need to check if the server is still alive
     // inside them.
-    // Also, the device is special-cased in Server::DoDestroyObject to call
+    // Also, the device is special-cased in Server::DoUnregisterObject to call
     // ClearDeviceCallbacks. This ensures that callbacks will not fire after |deviceObject|
     // is freed.
 

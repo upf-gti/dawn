@@ -27,6 +27,7 @@
 
 #include "src/tint/lang/core/ir/ir_helper_test.h"
 
+#include "src/tint/lang/core/io_attributes.h"
 #include "src/tint/lang/core/ir/binary/decode.h"
 #include "src/tint/lang/core/ir/binary/encode.h"
 #include "src/tint/lang/core/ir/disassembler.h"
@@ -49,7 +50,7 @@ class IRBinaryRoundtripTestBase : public IRTestParamHelper<T> {
   public:
     std::pair<std::string, std::string> Roundtrip() {
         auto pre = Disassembler(this->mod).Plain();
-        auto encoded = Encode(this->mod);
+        auto encoded = EncodeToBinary(this->mod);
         if (encoded != Success) {
             return {pre, encoded.Failure().reason.Str()};
         }
@@ -138,7 +139,9 @@ TEST_F(IRBinaryRoundtripTest, Fn_ParameterAttributes) {
     auto* p3 = b.FunctionParam(ty.bool_());
     p0->SetBuiltin(BuiltinValue::kGlobalInvocationId);
     p1->SetInvariant(true);
-    p2->SetLocation(10, Interpolation{InterpolationType::kFlat, InterpolationSampling::kCenter});
+    p2->SetLocation(10);
+    p2->SetColor(50);
+    p2->SetInterpolation(Interpolation{InterpolationType::kFlat, InterpolationSampling::kCenter});
     p3->SetBindingPoint(20, 30);
     fn->SetParams({p0, p1, p2, p3});
     RUN_TEST();
@@ -153,17 +156,18 @@ TEST_F(IRBinaryRoundtripTest, Fn_ReturnBuiltin) {
 
 TEST_F(IRBinaryRoundtripTest, Fn_ReturnLocation) {
     auto* fn = b.Function("Function", ty.void_());
-    fn->SetReturnLocation(42, std::nullopt);
+    fn->SetReturnLocation(42);
     b.ir.SetName(fn, "Function");
     RUN_TEST();
 }
 
 TEST_F(IRBinaryRoundtripTest, Fn_ReturnLocation_Interpolation) {
     auto* fn = b.Function("Function", ty.void_());
-    fn->SetReturnLocation(0, core::Interpolation{
-                                 core::InterpolationType::kPerspective,
-                                 core::InterpolationSampling::kCentroid,
-                             });
+    fn->SetReturnLocation(0);
+    fn->SetReturnInterpolation(core::Interpolation{
+        core::InterpolationType::kPerspective,
+        core::InterpolationSampling::kCentroid,
+    });
     b.ir.SetName(fn, "Function");
     RUN_TEST();
 }
@@ -258,24 +262,24 @@ TEST_F(IRBinaryRoundtripTest, struct) {
     Vector members{
         ty.Get<core::type::StructMember>(b.ir.symbols.New("a"), ty.i32(), /* index */ 0u,
                                          /* offset */ 0u, /* align */ 4u, /* size */ 4u,
-                                         type::StructMemberAttributes{}),
+                                         core::IOAttributes{}),
         ty.Get<core::type::StructMember>(b.ir.symbols.New("b"), ty.f32(), /* index */ 1u,
                                          /* offset */ 4u, /* align */ 4u, /* size */ 32u,
-                                         type::StructMemberAttributes{}),
+                                         core::IOAttributes{}),
         ty.Get<core::type::StructMember>(b.ir.symbols.New("c"), ty.u32(), /* index */ 2u,
                                          /* offset */ 36u, /* align */ 4u, /* size */ 4u,
-                                         type::StructMemberAttributes{}),
+                                         core::IOAttributes{}),
         ty.Get<core::type::StructMember>(b.ir.symbols.New("d"), ty.u32(), /* index */ 3u,
                                          /* offset */ 64u, /* align */ 32u, /* size */ 4u,
-                                         type::StructMemberAttributes{}),
+                                         core::IOAttributes{}),
     };
     auto* S = ty.Struct(b.ir.symbols.New("S"), std::move(members));
     b.Append(b.ir.root_block, [&] { b.Var(ty.ptr<function, read_write>(S)); });
     RUN_TEST();
 }
 
-TEST_F(IRBinaryRoundtripTest, StructMemberAttributes) {
-    type::StructMemberAttributes attrs{};
+TEST_F(IRBinaryRoundtripTest, IOAttributes) {
+    core::IOAttributes attrs{};
     attrs.location = 1;
     attrs.blend_src = 2;
     attrs.color = 3;

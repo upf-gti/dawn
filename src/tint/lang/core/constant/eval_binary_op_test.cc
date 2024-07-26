@@ -454,9 +454,9 @@ std::vector<Case> OpDivIntCases() {
         C(T{0}, T::Highest(), T{0}),
 
         // Divide by zero
-        E(T{123}, T{0}, error_msg(T{123}, T{0})),
-        E(T::Highest(), T{0}, error_msg(T::Highest(), T{0})),
-        E(T::Lowest(), T{0}, error_msg(T::Lowest(), T{0})),
+        E(T{123}, T{0}, "12:34 error: integer division by zero is invalid"),
+        E(T::Highest(), T{0}, "12:34 error: integer division by zero is invalid"),
+        E(T::Lowest(), T{0}, "12:34 error: integer division by zero is invalid"),
     };
 
     // Error on most negative divided by -1
@@ -526,9 +526,15 @@ std::vector<Case> OpModCases() {
         C(T{10}, T{10}, T{0}),  //
 
         // Error on divide by zero
-        E(T{123}, T{0}, error_msg(T{123}, T{0})),
-        E(T::Highest(), T{0}, error_msg(T::Highest(), T{0})),
-        E(T::Lowest(), T{0}, error_msg(T::Lowest(), T{0})),
+        E(T{123}, T{0},
+          IsIntegral<T> ? "12:34 error: integer division by zero is invalid"
+                        : error_msg(T{123}, T{0})),
+        E(T::Highest(), T{0},
+          IsIntegral<T> ? "12:34 error: integer division by zero is invalid"
+                        : error_msg(T::Highest(), T{0})),
+        E(T::Lowest(), T{0},
+          IsIntegral<T> ? "12:34 error: integer division by zero is invalid"
+                        : error_msg(T::Lowest(), T{0})),
     };
 
     if constexpr (IsIntegral<T>) {
@@ -1400,7 +1406,8 @@ std::vector<Case> ShiftRightCases() {
 
     // Test shift right by bit width or more
     if constexpr (IsAbstract<T>) {
-        // For abstract int, no error, result is 0
+        // For abstract int, no error, result is replaced with all msb (-1 for negative, 0 for
+        // non-negative)
         ConcatInto(  //
             r, std::vector<Case>{
                    C(T{0}, u32{B::NumBits}, T{0}),
@@ -1409,6 +1416,8 @@ std::vector<Case> ShiftRightCases() {
                    C(T{42}, u32{B::NumBits}, T{0}),
                    C(T{42}, u32{B::NumBits + 1}, T{0}),
                    C(T{42}, u32{B::NumBits + 1000}, T{0}),
+                   C(T{-42}, u32{B::NumBits + 1}, T{-1}),
+                   C(T{-42}, u32{B::NumBits + 1000}, T{-1}),
                });
     } else {
         // For concretes, error
@@ -1561,7 +1570,7 @@ TEST_F(ConstEvalTest, NonShortCircuit_And_Invalid_Binary) {
     GlobalConst("result", binary);
 
     EXPECT_FALSE(r()->Resolve());
-    EXPECT_EQ(r()->error(), "12:34 error: '2 / 0' cannot be represented as 'abstract-int'");
+    EXPECT_EQ(r()->error(), "12:34 error: integer division by zero is invalid");
 }
 
 TEST_F(ConstEvalTest, ShortCircuit_And_Error_Binary) {
@@ -1605,7 +1614,7 @@ TEST_F(ConstEvalTest, NonShortCircuit_Or_Invalid_Binary) {
     GlobalConst("result", binary);
 
     EXPECT_FALSE(r()->Resolve());
-    EXPECT_EQ(r()->error(), "12:34 error: '2 / 0' cannot be represented as 'abstract-int'");
+    EXPECT_EQ(r()->error(), "12:34 error: integer division by zero is invalid");
 }
 
 TEST_F(ConstEvalTest, ShortCircuit_Or_Error_Binary) {

@@ -160,7 +160,7 @@ class EncodingContext {
     RenderPassUsages AcquireRenderPassUsages();
     ComputePassUsages AcquireComputePassUsages();
 
-    void PushDebugGroupLabel(const char* groupLabel);
+    void PushDebugGroupLabel(std::string_view groupLabel);
     void PopDebugGroupLabel();
 
   private:
@@ -194,8 +194,10 @@ class EncodingContext {
     bool mWereCommandsAcquired = false;
     bool mDestroyed = false;
 
+    // Contains pointers to strings allocated inside the command allocators.
+    std::vector<std::string_view> mDebugGroupLabels;
+
     std::unique_ptr<ErrorData> mError;
-    std::vector<std::string> mDebugGroupLabels;
 };
 
 }  // namespace dawn::native

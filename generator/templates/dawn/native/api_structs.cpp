@@ -32,7 +32,10 @@
 {% set namespace = metadata.namespace %}
 #include "{{native_dir}}/{{namespace}}_structs_autogen.h"
 
+#include <cstring>
 #include <tuple>
+
+#include "dawn/common/Assert.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 // error: 'offsetof' within non-standard-layout type '{{namespace}}::XXX' is conditionally-supported
@@ -104,7 +107,7 @@ namespace {{native_namespace}} {
                 return copy;
             }
         {% endif %}
-        bool {{CppType}}::operator==(const {{as_cppType(type.name)}}& rhs) const {
+        bool {{CppType}}::operator==(const {{CppType}}& rhs) const {
             return {% if type.extensible or type.chained -%}
                 (nextInChain == rhs.nextInChain) &&
             {%- endif %} std::tie(
@@ -125,14 +128,7 @@ namespace {{native_namespace}} {
     {% for type in by_category["structure"] if type.has_free_members_function %}
         // {{as_cppType(type.name)}}
         {{as_cppType(type.name)}}::~{{as_cppType(type.name)}}() {
-            if (
-                {%- for member in type.members if member.annotation != 'value' %}
-                    {% if not loop.first %} || {% endif -%}
-                    this->{{member.name.camelCase()}} != nullptr
-                {%- endfor -%}
-            ) {
-                API{{as_MethodSuffix(type.name, Name("free members"))}}(*reinterpret_cast<{{as_cType(type.name)}}*>(this));
-            }
+            FreeMembers();
         }
 
         {{as_cppType(type.name)}}::{{as_cppType(type.name)}}({{as_cppType(type.name)}}&& rhs)
@@ -150,7 +146,7 @@ namespace {{native_namespace}} {
             if (&rhs == this) {
                 return *this;
             }
-            this->~{{as_cppType(type.name)}}();
+            FreeMembers();
             {% for member in type.members %}
                 this->{{member.name.camelCase()}} = std::move(rhs.{{member.name.camelCase()}});
             {% endfor %}
@@ -160,6 +156,37 @@ namespace {{native_namespace}} {
             return *this;
         }
 
+        void {{as_cppType(type.name)}}::FreeMembers() {
+            if (
+                {%- for member in type.members if member.annotation != 'value' %}
+                    {% if not loop.first %} || {% endif -%}
+                    this->{{member.name.camelCase()}} != nullptr
+                {%- endfor -%}
+            ) {
+                API{{as_MethodSuffix(type.name, Name("free members"))}}(*reinterpret_cast<{{as_cType(type.name)}}*>(this));
+            }
+        }
+
     {% endfor %}
+
+    StringView::operator std::string_view() const {
+        const bool isNull = this->data == nullptr;
+        const bool useStrlen = this->length == SIZE_MAX;
+        DAWN_ASSERT(!(isNull && useStrlen));
+        return std::string_view(this->data, isNull      ? 0
+                                            : useStrlen ? std::strlen(this->data)
+                                                        : this->length);
+    }
+
+    NullableStringView::operator std::optional<std::string_view>() const {
+        const bool isNull = this->data == nullptr;
+        const bool useStrlen = this->length == SIZE_MAX;
+        if (isNull && useStrlen) {
+            return std::nullopt;
+        }
+        return std::string_view(this->data, isNull      ? 0
+                                            : useStrlen ? std::strlen(this->data)
+                                                        : this->length);
+    }
 
 } // namespace {{native_namespace}}

@@ -2813,6 +2813,20 @@ fn f(cond : bool) {
 )");
 }
 
+// Test case for crbug.com/351700183.
+TEST_F(IRToProgramRoundtripTest, While_ConditionAndBreak) {
+    RUN_TEST(R"(
+fn f() {
+  while(true) {
+    if (false) {
+    } else {
+      break;
+    }
+  }
+}
+)");
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Loop
 ////////////////////////////////////////////////////////////////////////////////
@@ -3359,6 +3373,30 @@ TEST_F(IRToProgramRoundtripTest, LocationOutputLargerThanI32) {
 @fragment
 fn main() -> @location(4000000000u) vec4<f32> {
   return vec4<f32>();
+}
+)");
+}
+
+// Test that we do not try to declare or name the unnameable builtin structure types.
+// See crbug.com/350518995.
+TEST_F(IRToProgramRoundtripTest, BuiltinStructInLetAndVar) {
+    RUN_TEST(R"(
+fn a(x : f32) {
+  let b = frexp(x);
+}
+
+fn c(y : f32) {
+  var d = frexp(y);
+}
+)");
+}
+
+// Test that we do not try to name the unnameable builtin structure types in array declarations.
+// See crbug.com/353249345.
+TEST_F(IRToProgramRoundtripTest, BuiltinStructInInferredArrayType) {
+    RUN_TEST(R"(
+fn a(x : f32) {
+  let y = array(frexp(x));
 }
 )");
 }

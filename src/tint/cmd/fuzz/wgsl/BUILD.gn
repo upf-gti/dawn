@@ -92,6 +92,7 @@ if (tint_build_wgsl_reader) {
       "${tint_src_dir}/lang/core/constant",
       "${tint_src_dir}/lang/core/ir/transform:fuzz",
       "${tint_src_dir}/lang/core/type",
+      "${tint_src_dir}/lang/hlsl/writer/raise:fuzz",
       "${tint_src_dir}/lang/wgsl",
       "${tint_src_dir}/lang/wgsl:fuzz",
       "${tint_src_dir}/lang/wgsl/ast",
@@ -143,10 +144,7 @@ if (tint_build_wgsl_reader) {
     }
 
     if (tint_build_wgsl_reader) {
-      deps += [
-        "${tint_src_dir}/cmd/fuzz/wgsl:fuzz",
-        "${tint_src_dir}/lang/wgsl/ast/transform:fuzz",
-      ]
+      deps += [ "${tint_src_dir}/cmd/fuzz/wgsl:fuzz" ]
     }
 
     if (tint_build_wgsl_writer) {

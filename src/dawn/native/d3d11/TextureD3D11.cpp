@@ -146,23 +146,6 @@ DepthStencilAspectLayout DepthStencilAspectLayout(DXGI_FORMAT format, Aspect asp
 
 }  // namespace
 
-MaybeError ValidateVideoTextureCanBeShared(Device* device, DXGI_FORMAT textureFormat) {
-    const bool supportsSharedResourceCapabilityTier2 =
-        device->GetDeviceInfo().supportsSharedResourceCapabilityTier2;
-    switch (textureFormat) {
-        case DXGI_FORMAT_NV12:
-        case DXGI_FORMAT_P010:
-            if (supportsSharedResourceCapabilityTier2) {
-                return {};
-            }
-            break;
-        default:
-            break;
-    }
-
-    return DAWN_VALIDATION_ERROR("DXGI format does not support cross-API sharing.");
-}
-
 // static
 ResultOrError<Ref<Texture>> Texture::Create(Device* device,
                                             const UnpackedPtr<TextureDescriptor>& descriptor) {
@@ -229,8 +212,8 @@ T Texture::GetD3D11TextureDesc() const {
 
     desc.MipLevels = static_cast<UINT16>(GetNumMipLevels());
     // To sample from a depth or stencil texture, we need to create a typeless texture.
-    bool needsTypelessFormat =
-        GetFormat().HasDepthOrStencil() && (GetUsage() & wgpu::TextureUsage::TextureBinding);
+    bool needsTypelessFormat = GetFormat().HasDepthOrStencil() &&
+                               (GetInternalUsage() & wgpu::TextureUsage::TextureBinding);
     // We need to use the typeless format if view format reinterpretation is required.
     needsTypelessFormat |= GetViewFormats().any();
     // We need to use the typeless format if it's a staging texture for writting to depth-stencil
@@ -1126,30 +1109,27 @@ ResultOrError<ComPtr<ID3D11ShaderResourceView>> Texture::GetStencilSRV(
                     ComputeRequiredBytesInCopy(blockInfo, size, bytesPerRow, rowsPerImage));
 
     std::vector<uint8_t> stagingData(byteLength);
-    for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.layerCount;
-         ++layer) {
-        for (uint32_t level = range.baseMipLevel; level < range.baseMipLevel + range.levelCount;
-             ++level) {
-            size = GetMipLevelSubresourceVirtualSize(level, range.aspects);
-            bytesPerRow = blockInfo.byteSize * size.width;
-            rowsPerImage = size.height;
-            auto singleRange = SubresourceRange::MakeSingle(range.aspects, layer, level);
+    for (uint32_t level = range.baseMipLevel; level < range.baseMipLevel + range.levelCount;
+         ++level) {
+        size = GetMipLevelSubresourceVirtualSize(level, range.aspects);
+        bytesPerRow = blockInfo.byteSize * size.width;
+        rowsPerImage = size.height;
+        auto singleRange = SubresourceRange(range.aspects, {0, range.layerCount}, {level, 1});
 
-            Texture::ReadCallback callback = [&](const uint8_t* data, uint64_t offset,
-                                                 uint64_t length) -> MaybeError {
-                std::memcpy(static_cast<uint8_t*>(stagingData.data()) + offset, data, length);
-                return {};
-            };
+        Texture::ReadCallback callback = [&](const uint8_t* data, uint64_t offset,
+                                             uint64_t length) -> MaybeError {
+            std::memcpy(static_cast<uint8_t*>(stagingData.data()) + offset, data, length);
+            return {};
+        };
 
-            // TODO(dawn:1705): Work out a way of GPU-GPU copy, rather than the CPU-GPU round trip.
-            GetDevice()->EmitWarningOnce("Sampling the stencil component is rather slow now.");
-            DAWN_TRY(Read(commandContext, singleRange, {0, 0, 0}, size, bytesPerRow, rowsPerImage,
-                          callback));
+        // TODO(dawn:1705): Work out a way of GPU-GPU copy, rather than the CPU-GPU round trip.
+        GetDevice()->EmitWarningOnce("Sampling the stencil component is rather slow now.");
+        DAWN_TRY(Read(commandContext, singleRange, {0, 0, 0}, size, bytesPerRow, rowsPerImage,
+                      callback));
 
-            DAWN_TRY(mTextureForStencilSampling->WriteInternal(commandContext, singleRange,
-                                                               {0, 0, 0}, size, stagingData.data(),
-                                                               bytesPerRow, rowsPerImage));
-        }
+        DAWN_TRY(mTextureForStencilSampling->WriteInternal(commandContext, singleRange, {0, 0, 0},
+                                                           size, stagingData.data(), bytesPerRow,
+                                                           rowsPerImage));
     }
 
     Ref<TextureViewBase> textureView;

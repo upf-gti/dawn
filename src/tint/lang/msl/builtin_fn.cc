@@ -94,8 +94,16 @@ const char* str(BuiltinFn i) {
             return "distance";
         case BuiltinFn::kDot:
             return "dot";
+        case BuiltinFn::kFmod:
+            return "fmod";
+        case BuiltinFn::kFrexp:
+            return "frexp";
         case BuiltinFn::kLength:
             return "length";
+        case BuiltinFn::kModf:
+            return "modf";
+        case BuiltinFn::kSign:
+            return "sign";
         case BuiltinFn::kThreadgroupBarrier:
             return "threadgroup_barrier";
     }

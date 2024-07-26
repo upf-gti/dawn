@@ -26,23 +26,28 @@
 //* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package {{ kotlin_package }}
 
+import dalvik.annotation.optimization.FastNative
 import java.nio.ByteBuffer
-{% from 'art/api_kotlin_types.kt' import kotlin_type_declaration, kotlin_definition with context %}
+
+{% from 'art/api_kotlin_types.kt' import kotlin_declaration, kotlin_definition with context %}
 
 class {{ obj.name.CamelCase() }}(val handle: Long): AutoCloseable {
     {% for method in obj.methods if include_method(method) %}
-        @JvmName("{{ method.name.camelCase() }}") external fun {{ method.name.camelCase() }}(
+        @FastNative
+        @JvmName("{{ method.name.camelCase() }}")
+        external fun {{ method.name.camelCase() }}(
         //* TODO(b/341923892): rework async methods to use futures.
-        {%- for arg in filter_arguments(method.arguments) %}
-            {{- as_varName(arg.name) }}: {{ kotlin_definition(arg) }},
-        {%- endfor -%}):
-        {{- kotlin_type_declaration(method.return_type) -}}
+        {%- for arg in kotlin_record_members(method.arguments) %}
+            {{- as_varName(arg.name) }}: {{ kotlin_definition(arg) }},{{ ' ' }}
+        {%- endfor -%}): {{ kotlin_declaration(kotlin_return(method)) }}
+
         {% if method.name.chunks[0] == 'get' and not method.arguments %}
             //* For the Kotlin getter, strip word 'get' from name and convert the remainder to
             //* camelCase() (lower case first word). E.g. "get foo bar" translated to fooBar.
             {% set name = method.name.chunks[1] + method.name.chunks[2:] | map('title') | join %}
             @get:JvmName("{{ name }}")
             val {{ name }} get() = {{ method.name.camelCase() }}()
+
         {% endif %}
     {% endfor %}
     external override fun close();

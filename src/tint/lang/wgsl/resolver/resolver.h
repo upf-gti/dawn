@@ -254,13 +254,6 @@ class Resolver {
         const ast::Expression* expr);
 
     /// @returns the call of Expression() cast to a
-    /// sem::BuiltinEnumExpression<core::BuiltinValue>. If the sem::Expression is not a
-    /// sem::BuiltinEnumExpression<core::BuiltinValue>, then an error diagnostic is raised and
-    /// nullptr is returned.
-    sem::BuiltinEnumExpression<core::BuiltinValue>* BuiltinValueExpression(
-        const ast::Expression* expr);
-
-    /// @returns the call of Expression() cast to a
     /// sem::BuiltinEnumExpression<core::type::TexelFormat>. If the sem::Expression is not a
     /// sem::BuiltinEnumExpression<core::type::TexelFormat>, then an error diagnostic is raised and
     /// nullptr is returned.
@@ -271,20 +264,6 @@ class Resolver {
     /// If the sem::Expression is not a sem::BuiltinEnumExpression<core::Access>*, then an error
     /// diagnostic is raised and nullptr is returned.
     sem::BuiltinEnumExpression<core::Access>* AccessExpression(const ast::Expression* expr);
-
-    /// @returns the call of Expression() cast to a
-    /// sem::BuiltinEnumExpression<core::InterpolationSampling>*. If the sem::Expression is not a
-    /// sem::BuiltinEnumExpression<core::InterpolationSampling>*, then an error diagnostic is
-    /// raised and nullptr is returned.
-    sem::BuiltinEnumExpression<core::InterpolationSampling>* InterpolationSampling(
-        const ast::Expression* expr);
-
-    /// @returns the call of Expression() cast to a
-    /// sem::BuiltinEnumExpression<core::InterpolationType>*. If the sem::Expression is not a
-    /// sem::BuiltinEnumExpression<core::InterpolationType>*, then an error diagnostic is raised
-    /// and nullptr is returned.
-    sem::BuiltinEnumExpression<core::InterpolationType>* InterpolationType(
-        const ast::Expression* expr);
 
     /// Expression traverses the graph of expressions starting at `expr`, building a post-ordered
     /// list (leaf-first) of all the expression nodes. Each of the expressions are then resolved by
@@ -423,10 +402,6 @@ class Resolver {
     /// current_function_
     bool WorkgroupSize(const ast::Function*);
 
-    /// Resolves the `@builtin` attribute @p attr
-    /// @returns the builtin value on success
-    tint::Result<tint::core::BuiltinValue> BuiltinAttribute(const ast::BuiltinAttribute* attr);
-
     /// Resolves the `@location` attribute @p attr
     /// @returns the location value on success.
     tint::Result<uint32_t> LocationAttribute(const ast::LocationAttribute* attr);
@@ -475,10 +450,6 @@ class Resolver {
     /// Resolves the `@stride` attribute @p attr
     /// @returns true on success, false on failure
     bool StrideAttribute(const ast::StrideAttribute*);
-
-    /// Resolves the `@interpolate` attribute @p attr
-    /// @returns true on success, false on failure
-    tint::Result<core::Interpolation> InterpolateAttribute(const ast::InterpolateAttribute* attr);
 
     /// Resolves the internal attribute @p attr
     /// @returns true on success, false on failure

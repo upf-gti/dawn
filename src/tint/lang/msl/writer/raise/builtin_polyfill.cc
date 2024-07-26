@@ -81,7 +81,7 @@ struct State {
     /// Process the module.
     void Process() {
         // Find the builtins that need replacing.
-        Vector<core::ir::CoreBuiltinCall*, 4> worklist;
+        Vector<core::ir::CoreBuiltinCall*, 4> builtin_worklist;
         for (auto* inst : ir.Instructions()) {
             if (auto* builtin = inst->As<core::ir::CoreBuiltinCall>()) {
                 switch (builtin->Func()) {
@@ -98,8 +98,12 @@ struct State {
                     case core::BuiltinFn::kAtomicXor:
                     case core::BuiltinFn::kDistance:
                     case core::BuiltinFn::kDot:
+                    case core::BuiltinFn::kFrexp:
                     case core::BuiltinFn::kLength:
+                    case core::BuiltinFn::kModf:
+                    case core::BuiltinFn::kPack2X16Float:
                     case core::BuiltinFn::kQuantizeToF16:
+                    case core::BuiltinFn::kSign:
                     case core::BuiltinFn::kTextureDimensions:
                     case core::BuiltinFn::kTextureGather:
                     case core::BuiltinFn::kTextureGatherCompare:
@@ -118,7 +122,7 @@ struct State {
                     case core::BuiltinFn::kWorkgroupBarrier:
                     case core::BuiltinFn::kTextureBarrier:
                     case core::BuiltinFn::kUnpack2X16Float:
-                        worklist.Push(builtin);
+                        builtin_worklist.Push(builtin);
                         break;
                     default:
                         break;
@@ -127,7 +131,7 @@ struct State {
         }
 
         // Replace the builtins that we found.
-        for (auto* builtin : worklist) {
+        for (auto* builtin : builtin_worklist) {
             switch (builtin->Func()) {
                 // Atomics.
                 case core::BuiltinFn::kAtomicAdd:
@@ -171,11 +175,20 @@ struct State {
                 case core::BuiltinFn::kDot:
                     Dot(builtin);
                     break;
+                case core::BuiltinFn::kFrexp:
+                    Frexp(builtin);
+                    break;
                 case core::BuiltinFn::kLength:
                     Length(builtin);
                     break;
+                case core::BuiltinFn::kModf:
+                    Modf(builtin);
+                    break;
                 case core::BuiltinFn::kQuantizeToF16:
                     QuantizeToF16(builtin);
+                    break;
+                case core::BuiltinFn::kSign:
+                    Sign(builtin);
                     break;
 
                 // Texture builtins.
@@ -234,6 +247,9 @@ struct State {
                     break;
 
                 // Pack/unpack builtins.
+                case core::BuiltinFn::kPack2X16Float:
+                    Pack2x16Float(builtin);
+                    break;
                 case core::BuiltinFn::kUnpack2X16Float:
                     Unpack2x16Float(builtin);
                     break;
@@ -355,6 +371,34 @@ struct State {
         builtin->Destroy();
     }
 
+    /// Polyfill a frexp call.
+    /// @param builtin the builtin call instruction
+    void Frexp(core::ir::CoreBuiltinCall* builtin) {
+        b.InsertBefore(builtin, [&] {
+            // MSL's frexp returns `fract` and outputs `exp` as an output parameter.
+            // Polyfill it by declaring the result struct and then setting the values:
+            //   __frexp_result result = {};
+            //   result.fract = frexp(arg, result.exp);
+            //
+            // Note: We need to use a `load` instruction to pass `result.exp`, as the intrinsic
+            // definition expects a value type (as we do not have reference types in the IR). The
+            // printer will just fold away the load, which achieves the pass-by-reference semantics
+            // that we want.
+            //
+            auto* result_type = builtin->Result(0)->Type();
+            auto* float_type = result_type->Element(0);
+            auto* i32_type = result_type->Element(1);
+            auto* result = b.Var(ty.ptr(function, result_type));
+            auto* exp = b.Access(ty.ptr(function, i32_type), result, u32(1));
+            auto args = Vector<core::ir::Value*, 2>{builtin->Args()[0], b.Load(exp)->Result(0)};
+            auto* call =
+                b.Call<msl::ir::BuiltinCall>(float_type, msl::BuiltinFn::kFrexp, std::move(args));
+            b.Store(b.Access(ty.ptr(function, float_type), result, u32(0)), call);
+            builtin->Result(0)->ReplaceAllUsesWith(b.Load(result)->Result(0));
+        });
+        builtin->Destroy();
+    }
+
     /// Polyfill a length call if necessary.
     /// @param builtin the builtin call instruction
     void Length(core::ir::CoreBuiltinCall* builtin) {
@@ -371,19 +415,79 @@ struct State {
         builtin->Destroy();
     }
 
+    /// Polyfill a modf call.
+    /// @param builtin the builtin call instruction
+    void Modf(core::ir::CoreBuiltinCall* builtin) {
+        b.InsertBefore(builtin, [&] {
+            // MSL's modf returns `fract` and outputs `whole` as an output parameter.
+            // Polyfill it by declaring the result struct and then setting the values:
+            //   __modf_result result = {};
+            //   result.fract = modf(arg, result.whole);
+            //
+            // Note: We need to use a `load` instruction to pass `result.whole`, as the intrinsic
+            // definition expects a value type (as we do not have reference types in the IR). The
+            // printer will just fold away the load, which achieves the pass-by-reference semantics
+            // that we want.
+            //
+            auto* result_type = builtin->Result(0)->Type();
+            auto* element_type = result_type->Element(0);
+            auto* result = b.Var(ty.ptr(function, result_type));
+            auto* whole = b.Access(ty.ptr(function, element_type), result, u32(1));
+            auto args = Vector<core::ir::Value*, 2>{builtin->Args()[0], b.Load(whole)->Result(0)};
+            auto* call =
+                b.Call<msl::ir::BuiltinCall>(element_type, msl::BuiltinFn::kModf, std::move(args));
+            b.Store(b.Access(ty.ptr(function, element_type), result, u32(0)), call);
+            builtin->Result(0)->ReplaceAllUsesWith(b.Load(result)->Result(0));
+        });
+        builtin->Destroy();
+    }
+
+    /// Polyfill an Pack2x16Float call.
+    /// @param builtin the builtin call instruction
+    void Pack2x16Float(core::ir::CoreBuiltinCall* builtin) {
+        // Replace the call with `as_type<uint>(half2(value))`.
+        b.InsertBefore(builtin, [&] {
+            auto* convert = b.Convert<vec2<f16>>(builtin->Args()[0]);
+            auto* bitcast = b.Bitcast(ty.u32(), convert);
+            bitcast->SetResults(Vector{builtin->DetachResult()});
+        });
+        builtin->Destroy();
+    }
+
     /// Polyfill a quantizeToF16 call.
     /// @param builtin the builtin call instruction
     void QuantizeToF16(core::ir::CoreBuiltinCall* builtin) {
         auto* arg = builtin->Args()[0];
-        auto* type_f32 = arg->Type();
-        const core::type::Type* type_f16 = ty.f16();
-        if (auto* vec = type_f32->As<core::type::Vector>()) {
-            type_f16 = ty.vec(ty.f16(), vec->Width());
-        }
 
         // Convert the argument to f16 and then back again.
         b.InsertBefore(builtin, [&] {
-            b.ConvertWithResult(builtin->DetachResult(), b.Convert(type_f16, arg));
+            b.ConvertWithResult(builtin->DetachResult(),
+                                b.Convert(ty.match_width(ty.f16(), arg->Type()), arg));
+        });
+        builtin->Destroy();
+    }
+
+    /// Polyfill a sign call if necessary.
+    /// @param builtin the builtin call instruction
+    void Sign(core::ir::CoreBuiltinCall* builtin) {
+        auto* arg = builtin->Args()[0];
+        auto* type = arg->Type();
+        b.InsertBefore(builtin, [&] {
+            // Calls to `sign` with an integer argument are replaced with select operations:
+            //   result = select(select(-1, 1, arg > 0), 0, arg == 0);
+            if (type->is_integer_scalar_or_vector()) {
+                core::ir::Value* pos_one = b.MatchWidth(i32(1), type);
+                core::ir::Value* neg_one = b.MatchWidth(i32(-1), type);
+                const core::type::Type* bool_type = ty.match_width(ty.bool_(), type);
+                auto* zero = b.Zero(type);
+                auto* sign = b.Call(type, core::BuiltinFn::kSelect, neg_one, pos_one,
+                                    b.GreaterThan(bool_type, arg, zero));
+                b.CallWithResult(builtin->DetachResult(), core::BuiltinFn::kSelect, sign, zero,
+                                 b.Equal(bool_type, arg, zero));
+            } else {
+                b.CallWithResult<msl::ir::BuiltinCall>(builtin->DetachResult(),
+                                                       msl::BuiltinFn::kSign, arg);
+            }
         });
         builtin->Destroy();
     }
@@ -508,11 +612,7 @@ struct State {
         b.InsertBefore(builtin, [&] {
             // Convert the coordinates to unsigned integers if necessary.
             if (coords->Type()->is_signed_integer_scalar_or_vector()) {
-                if (auto* vec = coords->Type()->As<core::type::Vector>()) {
-                    coords = b.Convert(ty.vec(ty.u32(), vec->Width()), coords)->Result(0);
-                } else {
-                    coords = b.Convert(ty.u32(), coords)->Result(0);
-                }
+                coords = b.Convert(ty.match_width(ty.u32(), coords->Type()), coords)->Result(0);
             }
 
             // Call the `read()` member function.
@@ -730,11 +830,7 @@ struct State {
         b.InsertBefore(builtin, [&] {
             // Convert the coordinates to unsigned integers if necessary.
             if (coords->Type()->is_signed_integer_scalar_or_vector()) {
-                if (auto* vec = coords->Type()->As<core::type::Vector>()) {
-                    coords = b.Convert(ty.vec(ty.u32(), vec->Width()), coords)->Result(0);
-                } else {
-                    coords = b.Convert(ty.u32(), coords)->Result(0);
-                }
+                coords = b.Convert(ty.match_width(ty.u32(), coords->Type()), coords)->Result(0);
             }
 
             // Call the `write()` member function.

@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <sstream>
 #include <vector>
 
 #include "dawn/common/Constants.h"
@@ -302,7 +303,8 @@ class CopyTests_T2B : public CopyTests, public DawnTestWithParams<CopyTextureFor
         const BufferSpec& bufferSpec,
         const wgpu::Extent3D& copySize,
         wgpu::TextureDimension dimension = wgpu::TextureDimension::e2D,
-        wgpu::TextureViewDimension bindingViewDimension = wgpu::TextureViewDimension::Undefined) {
+        wgpu::TextureViewDimension bindingViewDimension = wgpu::TextureViewDimension::Undefined,
+        bool useMappableBuffer = false) {
         const uint32_t bytesPerTexel = utils::GetTexelBlockSizeInBytes(textureSpec.format);
         // Create a texture that is `width` x `height` with (`level` + 1) mip levels.
         wgpu::TextureDescriptor descriptor;
@@ -348,7 +350,12 @@ class CopyTests_T2B : public CopyTests, public DawnTestWithParams<CopyTextureFor
         // by the copy.
         wgpu::BufferDescriptor bufferDesc;
         bufferDesc.size = bufferSpec.size;
-        bufferDesc.usage = wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
+        bufferDesc.usage = wgpu::BufferUsage::CopyDst;
+        if (useMappableBuffer) {
+            bufferDesc.usage |= wgpu::BufferUsage::MapRead;
+        } else {
+            bufferDesc.usage |= wgpu::BufferUsage::CopySrc;
+        }
         wgpu::Buffer buffer = device.CreateBuffer(&bufferDesc);
 
         {
@@ -376,6 +383,19 @@ class CopyTests_T2B : public CopyTests, public DawnTestWithParams<CopyTextureFor
         std::vector<uint8_t> expected(utils::RequiredBytesInCopy(
             bufferSpec.bytesPerRow, bufferSpec.rowsPerImage, copySizePerLayer, textureSpec.format));
 
+        if (useMappableBuffer) {
+            bool done = false;
+            buffer.MapAsync(wgpu::MapMode::Read, 0, buffer.GetSize(),
+                            wgpu::CallbackMode::AllowProcessEvents,
+                            [&](wgpu::MapAsyncStatus status, const char*) {
+                                ASSERT_EQ(wgpu::MapAsyncStatus::Success, status);
+                                done = true;
+                            });
+            while (!done) {
+                WaitABit();
+            }
+        }
+
         for (uint32_t layer = textureSpec.copyOrigin.z; layer < maxArrayLayer; ++layer) {
             // Copy the data used to create the upload buffer in the specified copy region to have
             // the same format as the expected buffer data.
@@ -393,19 +413,39 @@ class CopyTests_T2B : public CopyTests, public DawnTestWithParams<CopyTextureFor
                             copyLayout.rowsPerImage, expected.data(), bufferSpec.bytesPerRow,
                             bufferSpec.rowsPerImage);
 
-            EXPECT_BUFFER_U8_RANGE_EQ(reinterpret_cast<const uint8_t*>(expected.data()), buffer,
-                                      bufferOffset, expected.size())
-                << "Texture to Buffer copy failed copying region [(" << textureSpec.copyOrigin.x
-                << ", " << textureSpec.copyOrigin.y << ", " << textureSpec.copyOrigin.z << "), ("
-                << textureSpec.copyOrigin.x + copySize.width << ", "
-                << textureSpec.copyOrigin.y + copySize.height << ", "
-                << textureSpec.copyOrigin.z + copySize.depthOrArrayLayers << ")) from "
-                << textureSpec.textureSize.width << " x " << textureSpec.textureSize.height
-                << " texture at mip level " << textureSpec.copyLevel << " layer " << layer << " to "
-                << bufferSpec.size << "-byte buffer with offset " << bufferOffset
-                << " and bytes per row " << bufferSpec.bytesPerRow << "\n";
+            std::ostringstream errorMsgSs;
+            errorMsgSs << "Texture to Buffer copy failed copying region [("
+                       << textureSpec.copyOrigin.x << ", " << textureSpec.copyOrigin.y << ", "
+                       << textureSpec.copyOrigin.z << "), ("
+                       << textureSpec.copyOrigin.x + copySize.width << ", "
+                       << textureSpec.copyOrigin.y + copySize.height << ", "
+                       << textureSpec.copyOrigin.z + copySize.depthOrArrayLayers << ")) from "
+                       << textureSpec.textureSize.width << " x " << textureSpec.textureSize.height
+                       << " texture at mip level " << textureSpec.copyLevel << " layer " << layer
+                       << " to " << bufferSpec.size << "-byte buffer with offset " << bufferOffset
+                       << " and bytes per row " << bufferSpec.bytesPerRow << "\n";
+
+            if (useMappableBuffer) {
+                const auto* mappedPtr = static_cast<const uint8_t*>(buffer.GetConstMappedRange());
+                for (size_t i = 0; i < expected.size(); ++i) {
+                    if (mappedPtr[bufferOffset + i] != expected[i]) {
+                        EXPECT_EQ(mappedPtr[bufferOffset + i], expected[i])
+                            << "with i=" << i << "\n"
+                            << errorMsgSs.str();
+                        break;
+                    }
+                }
+            } else {
+                EXPECT_BUFFER_U8_RANGE_EQ(reinterpret_cast<const uint8_t*>(expected.data()), buffer,
+                                          bufferOffset, expected.size())
+                    << errorMsgSs.str();
+            }
 
             bufferOffset += bufferSpec.bytesPerRow * bufferSpec.rowsPerImage;
+        }
+
+        if (useMappableBuffer) {
+            buffer.Unmap();
         }
     }
 };
@@ -1058,6 +1098,135 @@ TEST_P(CopyTests_T2B, OffsetBufferUnaligned) {
     }
 }
 
+// Test that copying without a 512-byte aligned buffer offset works. Note: the buffer is mappable.
+TEST_P(CopyTests_T2B, MappableBufferWithOffsetUnaligned) {
+    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 4 OpenGLES
+    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsQualcomm());
+
+    constexpr wgpu::Extent2D kSizes[] = {
+        {4, 4},
+        {17, 17},
+        {128, 128},
+        {256, 256},
+    };
+
+    for (const auto size : kSizes) {
+        TextureSpec textureSpec;
+        textureSpec.textureSize = {size.width, size.height, 1};
+
+        const uint32_t bytesPerTexel = utils::GetTexelBlockSizeInBytes(textureSpec.format);
+        for (uint32_t i = bytesPerTexel; i < 512; i += bytesPerTexel * 9) {
+            BufferSpec bufferSpec = MinimumBufferSpec(size.width, size.height);
+            bufferSpec.size += i;
+            bufferSpec.offset += i;
+            bufferSpec.size = Align(bufferSpec.size, 4);
+            bufferSpec.offset = Align(bufferSpec.offset, 4);
+            DoTest(textureSpec, bufferSpec, textureSpec.textureSize, wgpu::TextureDimension::e2D,
+                   wgpu::TextureViewDimension::Undefined, /*useMappableBuffer=*/true);
+        }
+    }
+}
+
+// Test that copying from a texture to a mappable buffer won't overwrite the buffer's bytes
+// before and after the copied region.
+TEST_P(CopyTests_T2B, MappableBufferBeforeAndAfterBytesNotOverwritten) {
+    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 4 OpenGLES
+    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsQualcomm());
+
+    constexpr uint32_t kWidth = 256;
+
+    wgpu::TextureDescriptor texDesc;
+    texDesc.dimension = wgpu::TextureDimension::e2D;
+    texDesc.size = {kWidth, 1, 1};
+    texDesc.sampleCount = 1;
+    texDesc.format = GetParam().mTextureFormat;
+    texDesc.mipLevelCount = 1;
+    texDesc.usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::CopySrc;
+    wgpu::Texture texture = device.CreateTexture(&texDesc);
+
+    // Layout for initial data upload to texture.
+    // Some parts of this result are also reused later.
+    const utils::TextureDataCopyLayout copyLayout =
+        utils::GetTextureDataCopyLayoutForTextureAtLevel(texDesc.format, texDesc.size, 0,
+                                                         wgpu::TextureDimension::e2D);
+
+    const std::vector<uint8_t> textureArrayData =
+        GetExpectedTextureData(texDesc.format, copyLayout);
+    const uint32_t bytesPerTexel = utils::GetTexelBlockSizeInBytes(texDesc.format);
+    {
+        wgpu::ImageCopyTexture imageCopyTexture =
+            utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
+        wgpu::TextureDataLayout textureDataLayout =
+            utils::CreateTextureDataLayout(0, copyLayout.bytesPerRow, copyLayout.rowsPerImage);
+        queue.WriteTexture(&imageCopyTexture, textureArrayData.data(), copyLayout.byteLength,
+                           &textureDataLayout, &copyLayout.mipSize);
+    }
+
+    // Create a destination buffer and fill its before & after bytes with random data
+    const uint32_t kCopyOffset = bytesPerTexel;
+    const auto kPastCopyOffset = kCopyOffset + textureArrayData.size();
+    wgpu::BufferDescriptor bufferDesc;
+    bufferDesc.size = Align(kPastCopyOffset + 16, 4);
+    bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+    bufferDesc.mappedAtCreation = true;
+    wgpu::Buffer buffer = device.CreateBuffer(&bufferDesc);
+
+    const auto kNumPastCopyBytes = bufferDesc.size - kPastCopyOffset;
+    const std::vector<uint8_t> kExpectedFirstBytes(kCopyOffset, 97);
+    const std::vector<uint8_t> kExpectedLastBytes(kNumPastCopyBytes, 99);
+    {
+        auto ptr = static_cast<uint8_t*>(buffer.GetMappedRange());
+        memcpy(ptr, kExpectedFirstBytes.data(), kExpectedFirstBytes.size());
+        memcpy(ptr + kPastCopyOffset, kExpectedLastBytes.data(), kExpectedLastBytes.size());
+        buffer.Unmap();
+    }
+
+    // Copy the texture to buffer at offset=bytesPerTexel and with tightly packed rows.
+    {
+        wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
+        wgpu::ImageCopyTexture imageCopyTexture =
+            utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
+        wgpu::ImageCopyBuffer imageCopyBuffer =
+            utils::CreateImageCopyBuffer(buffer, /*offset=*/kCopyOffset,
+                                         /*bytesPerRow=*/256 * bytesPerTexel, /*rowsPerImage=*/1);
+        encoder.CopyTextureToBuffer(&imageCopyTexture, &imageCopyBuffer, &texDesc.size);
+        wgpu::CommandBuffer commands = encoder.Finish();
+        queue.Submit(1, &commands);
+    }
+
+    {
+        bool done = false;
+        buffer.MapAsync(wgpu::MapMode::Read, 0, buffer.GetSize(),
+                        wgpu::CallbackMode::AllowProcessEvents,
+                        [&](wgpu::MapAsyncStatus status, const char*) {
+                            ASSERT_EQ(wgpu::MapAsyncStatus::Success, status);
+                            done = true;
+                        });
+        while (!done) {
+            WaitABit();
+        }
+    }
+
+    // Check copied bytes
+    const auto* bufferReadPtr = static_cast<const uint8_t*>(buffer.GetConstMappedRange());
+    for (size_t i = 0; i < textureArrayData.size(); ++i) {
+        EXPECT_EQ(bufferReadPtr[kCopyOffset + i], textureArrayData[i])
+            << "failed at [" << kCopyOffset + i << "]";
+    }
+
+    // Check that the first & last bytes outside copied region remain intact after the copy.
+    for (size_t i = 0; i < kCopyOffset; ++i) {
+        EXPECT_EQ(bufferReadPtr[i], kExpectedFirstBytes[i]) << "failed at [" << i << "]";
+    }
+
+    for (size_t i = 0; i < kNumPastCopyBytes; ++i) {
+        const size_t idx = kPastCopyOffset + i;
+        EXPECT_EQ(bufferReadPtr[idx], kExpectedLastBytes[i]) << "failed at [" << idx << "]";
+    }
+
+    buffer.Unmap();
+}
+
 // Test that copying without a 512-byte aligned buffer offset that is greater than the bytes per row
 // works
 TEST_P(CopyTests_T2B, OffsetBufferUnalignedSmallBytesPerRow) {
@@ -1563,6 +1732,10 @@ DAWN_INSTANTIATE_TEST_P(CopyTests_T2B,
                             wgpu::TextureFormat::R16Sint,
                             wgpu::TextureFormat::R16Float,
 
+                            wgpu::TextureFormat::RG16Uint,
+                            wgpu::TextureFormat::RG16Sint,
+                            wgpu::TextureFormat::RG16Float,
+
                             wgpu::TextureFormat::R32Uint,
                             wgpu::TextureFormat::R32Sint,
                             wgpu::TextureFormat::R32Float,
@@ -1662,13 +1835,6 @@ class CopyTests_T2B_Compat : public CopyTests_T2B {
 
 // Test that copying 2d texture array with binding view dimension set to cube.
 TEST_P(CopyTests_T2B_Compat, TextureCubeFull) {
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 4 OpenGLES (the RGBA8 control case
-    // without the blit is not working)
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsQualcomm() &&
-                          GetParam().mTextureFormat == wgpu::TextureFormat::RGBA8Unorm);
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 6 OpenGLES
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsARM());
-
     constexpr uint32_t kWidth = 32;
     constexpr uint32_t kHeight = 32;
     constexpr uint32_t kLayers = 6;
@@ -1682,13 +1848,6 @@ TEST_P(CopyTests_T2B_Compat, TextureCubeFull) {
 
 // Test that copying a range of cube texture layers in one texture-to-buffer-copy works.
 TEST_P(CopyTests_T2B_Compat, TextureCubeSubRegion) {
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 4 OpenGLES (the RGBA8 control case
-    // without the blit is not working)
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsQualcomm() &&
-                          GetParam().mTextureFormat == wgpu::TextureFormat::RGBA8Unorm);
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 6 OpenGLES
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsARM());
-
     constexpr uint32_t kWidth = 32;
     constexpr uint32_t kHeight = 32;
     constexpr uint32_t kLayers = 6;
@@ -1706,9 +1865,6 @@ TEST_P(CopyTests_T2B_Compat, TextureCubeSubRegion) {
 
 // Test that copying texture 2D array mips with 256-byte aligned sizes works
 TEST_P(CopyTests_T2B_Compat, TextureCubeMip) {
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 6 OpenGLES
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsARM());
-
     constexpr uint32_t kWidth = 32;
     constexpr uint32_t kHeight = 32;
     constexpr uint32_t kLayers = 6;
@@ -1730,13 +1886,6 @@ TEST_P(CopyTests_T2B_Compat, TextureCubeMip) {
 // Test that copying from a range of texture 2D array layers in one texture-to-buffer-copy when
 // RowsPerImage is not equal to the height of the texture works.
 TEST_P(CopyTests_T2B_Compat, TextureCubeRegionNonzeroRowsPerImage) {
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 4 OpenGLES (the RGBA8 control case
-    // without the blit is not working)
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsQualcomm() &&
-                          GetParam().mTextureFormat == wgpu::TextureFormat::RGBA8Unorm);
-    // TODO(crbug.com/dawn/2294): diagnose T2B failures on Pixel 6 OpenGLES
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsARM());
-
     constexpr uint32_t kWidth = 32;
     constexpr uint32_t kHeight = 32;
     constexpr uint32_t kLayers = 6;
@@ -2602,9 +2751,6 @@ TEST_P(CopyTests_T2T, CopyWithinSameTextureNonOverlappedSlices) {
 // A regression test (from WebGPU CTS) for an Intel D3D12 driver bug about T2T copy with specific
 // texture formats. See http://crbug.com/1161355 for more details.
 TEST_P(CopyTests_T2T, CopyFromNonZeroMipLevelWithTexelBlockSizeLessThan4Bytes) {
-    // TODO(crbug.com/dawn/2553): diagnose this flake on Pixel 6 OpenGLES
-    DAWN_SUPPRESS_TEST_IF(IsOpenGLES() && IsAndroid() && IsARM());
-
     constexpr std::array<wgpu::TextureFormat, 11> kFormats = {
         {wgpu::TextureFormat::RG8Sint, wgpu::TextureFormat::RG8Uint, wgpu::TextureFormat::RG8Snorm,
          wgpu::TextureFormat::RG8Unorm, wgpu::TextureFormat::R16Float, wgpu::TextureFormat::R16Sint,

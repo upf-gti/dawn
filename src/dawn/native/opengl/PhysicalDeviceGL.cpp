@@ -39,6 +39,7 @@
 #include "dawn/native/opengl/ContextEGL.h"
 #include "dawn/native/opengl/DeviceGL.h"
 #include "dawn/native/opengl/DisplayEGL.h"
+#include "dawn/native/opengl/SwapChainEGL.h"
 
 namespace dawn::native::opengl {
 
@@ -92,7 +93,7 @@ uint32_t GetDeviceIdFromRender(std::string_view render) {
 
 // static
 ResultOrError<Ref<PhysicalDevice>> PhysicalDevice::Create(wgpu::BackendType backendType,
-                                                          std::unique_ptr<DisplayEGL> display) {
+                                                          Ref<DisplayEGL> display) {
     const EGLFunctions& egl = display->egl;
     EGLDisplay eglDisplay = display->GetDisplay();
 
@@ -100,7 +101,7 @@ ResultOrError<Ref<PhysicalDevice>> PhysicalDevice::Create(wgpu::BackendType back
     // that we can query the limits and other properties. Assumes that the limit are the same
     // irrespective of the context creation options.
     std::unique_ptr<ContextEGL> context;
-    DAWN_TRY_ASSIGN(context, ContextEGL::Create(display.get(), backendType, /*useRobustness*/ false,
+    DAWN_TRY_ASSIGN(context, ContextEGL::Create(display, backendType, /*useRobustness*/ false,
                                                 /*useANGLETextureSharing*/ false));
 
     EGLSurface prevDrawSurface = egl.GetCurrentSurface(EGL_DRAW);
@@ -120,11 +121,11 @@ ResultOrError<Ref<PhysicalDevice>> PhysicalDevice::Create(wgpu::BackendType back
     return physicalDevice;
 }
 
-PhysicalDevice::PhysicalDevice(wgpu::BackendType backendType, std::unique_ptr<DisplayEGL> display)
+PhysicalDevice::PhysicalDevice(wgpu::BackendType backendType, Ref<DisplayEGL> display)
     : PhysicalDeviceBase(backendType), mDisplay(std::move(display)) {}
 
 DisplayEGL* PhysicalDevice::GetDisplay() const {
-    return mDisplay.get();
+    return mDisplay.Get();
 }
 
 bool PhysicalDevice::SupportsExternalImages() const {
@@ -134,6 +135,19 @@ bool PhysicalDevice::SupportsExternalImages() const {
 
 MaybeError PhysicalDevice::InitializeImpl() {
     DAWN_TRY(mFunctions.Initialize(mDisplay->egl.GetProcAddress));
+
+    // In some cases (like like of EGL_KHR_create_context) we don't know before this point that we
+    // got a GL context that supports the required version. Check it now.
+    switch (GetBackendType()) {
+        case wgpu::BackendType::OpenGLES:
+            DAWN_INVALID_IF(!mFunctions.IsAtLeastGLES(3, 1), "OpenGL ES 3.1 is required.");
+            break;
+        case wgpu::BackendType::OpenGL:
+            DAWN_INVALID_IF(!mFunctions.IsAtLeastGL(4, 4), "Desktop OpenGL 4.4 is required.");
+            break;
+        default:
+            DAWN_UNREACHABLE();
+    }
 
     if (mFunctions.GetVersion().IsES()) {
         DAWN_ASSERT(GetBackendType() == wgpu::BackendType::OpenGLES);
@@ -338,14 +352,6 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     bool supportsSnormRead =
         gl.IsAtLeastGL(4, 4) || gl.IsGLExtensionSupported("GL_EXT_render_snorm");
 
-    bool supportsDepthRead = gl.IsAtLeastGL(3, 0) || gl.IsGLExtensionSupported("GL_NV_read_depth");
-
-    bool supportsStencilRead =
-        gl.IsAtLeastGL(3, 0) || gl.IsGLExtensionSupported("GL_NV_read_stencil");
-
-    bool supportsDepthStencilRead =
-        gl.IsAtLeastGL(3, 0) || gl.IsGLExtensionSupported("GL_NV_read_depth_stencil");
-
     // Desktop GL supports BGRA textures via swizzling in the driver; ES requires an extension.
     bool supportsBGRARead =
         gl.GetVersion().IsDesktop() || gl.IsGLExtensionSupported("GL_EXT_read_format_bgra");
@@ -359,9 +365,6 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
 
     // TODO(crbug.com/dawn/343): Investigate emulation.
     deviceToggles->Default(Toggle::DisableIndexedDrawBuffers, !supportsIndexedDrawBuffers);
-    deviceToggles->Default(Toggle::DisableDepthRead, !supportsDepthRead);
-    deviceToggles->Default(Toggle::DisableStencilRead, !supportsStencilRead);
-    deviceToggles->Default(Toggle::DisableDepthStencilRead, !supportsDepthStencilRead);
     deviceToggles->Default(Toggle::DisableSampleVariables, !supportsSampleVariables);
     deviceToggles->Default(Toggle::FlushBeforeClientWaitSync, gl.GetVersion().IsES());
     // For OpenGL ES, we must use a placeholder fragment shader for vertex-only render pipeline.
@@ -413,7 +416,7 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
     bool useRobustness = !deviceToggles.IsEnabled(Toggle::DisableRobustness);
 
     std::unique_ptr<ContextEGL> context;
-    DAWN_TRY_ASSIGN(context, ContextEGL::Create(mDisplay.get(), GetBackendType(), useRobustness,
+    DAWN_TRY_ASSIGN(context, ContextEGL::Create(mDisplay, GetBackendType(), useRobustness,
                                                 useANGLETextureSharing));
 
     return Device::Create(adapter, descriptor, mFunctions, std::move(context), deviceToggles,
@@ -430,15 +433,14 @@ ResultOrError<PhysicalDeviceSurfaceCapabilities> PhysicalDevice::GetSurfaceCapab
     PhysicalDeviceSurfaceCapabilities capabilities;
 
     capabilities.usages = wgpu::TextureUsage::RenderAttachment |
-                          wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc |
-                          wgpu::TextureUsage::CopyDst;
+                          wgpu::TextureUsage::StorageBinding | wgpu::TextureUsage::TextureBinding |
+                          wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst;
 
-    // This is the only supported format in native mode (see crbug.com/dawn/160).
-#if DAWN_PLATFORM_IS(ANDROID)
-    capabilities.formats.push_back(wgpu::TextureFormat::RGBA8Unorm);
-#else
-    capabilities.formats.push_back(wgpu::TextureFormat::BGRA8Unorm);
-#endif  // !DAWN_PLATFORM_IS(ANDROID)
+    for (wgpu::TextureFormat format : mDisplay->GetPotentialSurfaceFormats()) {
+        if (mDisplay->ChooseConfig(EGL_WINDOW_BIT, format) != kNoConfig) {
+            capabilities.formats.push_back(format);
+        }
+    }
 
     capabilities.presentModes = {
         wgpu::PresentMode::Fifo,

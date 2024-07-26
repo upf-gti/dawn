@@ -4,10 +4,9 @@ precision highp int;
 
 layout(binding = 0, std430) buffer prevent_dce_block_ssbo {
   uvec3 inner;
-  uint pad;
 } prevent_dce;
 
-layout(rgba16ui) uniform highp writeonly uimage3D arg_0;
+layout(binding = 0, rgba16ui) uniform highp writeonly uimage3D arg_0;
 uvec3 textureDimensions_35a7e5() {
   uvec3 res = uvec3(imageSize(arg_0));
   return res;
@@ -25,10 +24,9 @@ void main() {
 
 layout(binding = 0, std430) buffer prevent_dce_block_ssbo {
   uvec3 inner;
-  uint pad;
 } prevent_dce;
 
-layout(rgba16ui) uniform highp writeonly uimage3D arg_0;
+layout(binding = 0, rgba16ui) uniform highp writeonly uimage3D arg_0;
 uvec3 textureDimensions_35a7e5() {
   uvec3 res = uvec3(imageSize(arg_0));
   return res;

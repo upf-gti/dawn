@@ -142,8 +142,11 @@ struct Encoder {
             fn_out->add_parameters(Value(param_in));
         }
         if (auto ret_loc_in = fn_in->ReturnLocation()) {
-            auto& ret_loc_out = *fn_out->mutable_return_location();
-            Location(ret_loc_out, *ret_loc_in);
+            fn_out->set_return_location(*ret_loc_in);
+        }
+        if (auto ret_interp_in = fn_in->ReturnInterpolation()) {
+            auto& ret_interp_out = *fn_out->mutable_return_interpolation();
+            Interpolation(ret_interp_out, *ret_interp_in);
         }
         if (auto builtin_in = fn_in->ReturnBuiltin()) {
             fn_out->set_return_builtin(BuiltinValue(*builtin_in));
@@ -550,8 +553,14 @@ struct Encoder {
             BindingPoint(bp_out, *bp_in);
         }
         if (auto location_in = param_in->Location()) {
-            auto& location_out = *param_out.mutable_attributes()->mutable_location();
-            Location(location_out, *location_in);
+            param_out.mutable_attributes()->set_location(*location_in);
+        }
+        if (auto color_in = param_in->Color()) {
+            param_out.mutable_attributes()->set_color(*color_in);
+        }
+        if (auto interpolation_in = param_in->Interpolation()) {
+            auto& interpolation_out = *param_out.mutable_attributes()->mutable_interpolation();
+            Interpolation(interpolation_out, *interpolation_in);
         }
         if (auto builtin_in = param_in->Builtin()) {
             param_out.mutable_attributes()->set_builtin(BuiltinValue(*builtin_in));
@@ -623,14 +632,6 @@ struct Encoder {
     ////////////////////////////////////////////////////////////////////////////
     // Attributes
     ////////////////////////////////////////////////////////////////////////////
-    void Location(pb::Location& location_out, const ir::Location& location_in) {
-        if (auto interpolation_in = location_in.interpolation) {
-            auto& interpolation_out = *location_out.mutable_interpolation();
-            Interpolation(interpolation_out, *interpolation_in);
-        }
-        location_out.set_value(location_in.value);
-    }
-
     void Interpolation(pb::Interpolation& interpolation_out,
                        const core::Interpolation& interpolation_in) {
         interpolation_out.set_type(InterpolationType(interpolation_in.type));
@@ -846,6 +847,10 @@ struct Encoder {
                 return pb::InterpolationSampling::centroid;
             case core::InterpolationSampling::kSample:
                 return pb::InterpolationSampling::sample;
+            case core::InterpolationSampling::kFirst:
+                return pb::InterpolationSampling::first;
+            case core::InterpolationSampling::kEither:
+                return pb::InterpolationSampling::either;
             case core::InterpolationSampling::kUndefined:
                 break;
         }
@@ -1145,30 +1150,27 @@ struct Encoder {
 
 }  // namespace
 
-Result<Vector<std::byte, 0>> Encode(const Module& mod_in) {
+std::unique_ptr<pb::Module> EncodeToProto(const Module& mod_in) {
     GOOGLE_PROTOBUF_VERIFY_VERSION;
 
     pb::Module mod_out;
     Encoder{mod_in, mod_out}.Encode();
 
+    return std::make_unique<pb::Module>(mod_out);
+}
+
+Result<Vector<std::byte, 0>> EncodeToBinary(const Module& mod_in) {
+    auto mod_out = EncodeToProto(mod_in);
+
     Vector<std::byte, 0> buffer;
-    size_t len = mod_out.ByteSizeLong();
+    size_t len = mod_out->ByteSizeLong();
     buffer.Resize(len);
     if (len > 0) {
-        if (!mod_out.SerializeToArray(&buffer[0], static_cast<int>(len))) {
+        if (!mod_out->SerializeToArray(&buffer[0], static_cast<int>(len))) {
             return Failure{"failed to serialize protobuf"};
         }
     }
     return buffer;
-}
-
-Result<std::string> EncodeDebug(const Module& mod_in) {
-    GOOGLE_PROTOBUF_VERIFY_VERSION;
-
-    pb::Module mod_out;
-    Encoder{mod_in, mod_out}.Encode();
-
-    return mod_out.DebugString();
 }
 
 }  // namespace tint::core::ir::binary

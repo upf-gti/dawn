@@ -83,6 +83,7 @@ set(private_headers
     "Ref.h"
     "RefBase.h"
     "RefCounted.h"
+    "RefCountedWithExternalCount.h"
     "Result.h"
     "SerialMap.h"
     "SerialQueue.h"
@@ -149,16 +150,20 @@ if (DAWN_ENABLE_VULKAN)
         Vulkan-Headers)
 endif ()
 
+list(APPEND conditional_private_depends
+    ${CMAKE_DL_LIBS})
+
 dawn_add_library(
     dawn_common
+    ENABLE_EMSCRIPTEN
     UTILITY_TARGET dawn_internal_config
     PRIVATE_HEADERS
         ${private_headers}
     SOURCES
         ${sources}
     DEPENDS
-        dawn::dawn_headers
-        dawn::dawncpp_headers
+        webgpu_c
+        webgpu_cpp
     PRIVATE_DEPENDS
         absl::inlined_vector
         dawn::partition_alloc

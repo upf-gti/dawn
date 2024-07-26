@@ -33,20 +33,18 @@
 namespace dawn::native::opengl {
 
 // static
-ResultOrError<std::unique_ptr<DisplayEGL>> DisplayEGL::CreateFromDynamicLoading(
-    wgpu::BackendType backend,
-    const char* libName) {
-    auto display = std::make_unique<DisplayEGL>(backend);
+ResultOrError<Ref<DisplayEGL>> DisplayEGL::CreateFromDynamicLoading(wgpu::BackendType backend,
+                                                                    const char* libName) {
+    Ref<DisplayEGL> display = AcquireRef(new DisplayEGL(backend));
     DAWN_TRY(display->InitializeWithDynamicLoading(libName));
     return std::move(display);
 }
 
 // static
-ResultOrError<std::unique_ptr<DisplayEGL>> DisplayEGL::CreateFromProcAndDisplay(
-    wgpu::BackendType backend,
-    EGLGetProcProc getProc,
-    EGLDisplay eglDisplay) {
-    auto display = std::make_unique<DisplayEGL>(backend);
+ResultOrError<Ref<DisplayEGL>> DisplayEGL::CreateFromProcAndDisplay(wgpu::BackendType backend,
+                                                                    EGLGetProcProc getProc,
+                                                                    EGLDisplay eglDisplay) {
+    Ref<DisplayEGL> display = AcquireRef(new DisplayEGL(backend));
     DAWN_TRY(display->InitializeWithProcAndDisplay(getProc, eglDisplay));
     return std::move(display);
 }
@@ -56,10 +54,12 @@ DisplayEGL::DisplayEGL(wgpu::BackendType backend) : egl(mFunctions) {
         case wgpu::BackendType::OpenGL:
             mApiEnum = EGL_OPENGL_API;
             mApiBit = EGL_OPENGL_BIT;
+            mRenderableBit = EGL_OPENGL_BIT;
             break;
         case wgpu::BackendType::OpenGLES:
             mApiEnum = EGL_OPENGL_ES_API;
             mApiBit = EGL_OPENGL_ES3_BIT;
+            mRenderableBit = EGL_OPENGL_ES2_BIT;
             break;
         default:
             DAWN_UNREACHABLE();
@@ -122,6 +122,95 @@ EGLint DisplayEGL::GetAPIEnum() const {
 
 EGLint DisplayEGL::GetAPIBit() const {
     return mApiBit;
+}
+
+absl::Span<const wgpu::TextureFormat> DisplayEGL::GetPotentialSurfaceFormats() const {
+    static constexpr wgpu::TextureFormat kFormatWhenConfigRequired[] = {
+        wgpu::TextureFormat::RGBA8Unorm};
+    static constexpr wgpu::TextureFormat kFormatsWithNoConfigContext[] = {
+        wgpu::TextureFormat::RGBA8Unorm, wgpu::TextureFormat::RGBA8UnormSrgb,
+        wgpu::TextureFormat::RGB10A2Unorm, wgpu::TextureFormat::RGBA16Float};
+
+    if (egl.HasExt(EGLExt::NoConfigContext)) {
+        return {kFormatsWithNoConfigContext};
+    }
+    return {kFormatWhenConfigRequired};
+}
+
+EGLConfig DisplayEGL::ChooseConfig(EGLint surfaceType,
+                                   wgpu::TextureFormat color,
+                                   wgpu::TextureFormat depthStencil) const {
+    absl::InlinedVector<EGLint, 20> attribs;
+    auto AddAttrib = [&](EGLint attrib, EGLint value) {
+        attribs.push_back(attrib);
+        attribs.push_back(value);
+    };
+
+    AddAttrib(EGL_SURFACE_TYPE, surfaceType);
+    AddAttrib(EGL_RENDERABLE_TYPE, mRenderableBit);
+    AddAttrib(EGL_CONFORMANT, mRenderableBit);
+
+    switch (color) {
+        case wgpu::TextureFormat::RGBA8UnormSrgb:
+            if (!egl.HasExt(EGLExt::GLColorspace)) {
+                return kNoConfig;
+            }
+            [[fallthrough]];
+        case wgpu::TextureFormat::RGBA8Unorm:
+            AddAttrib(EGL_RED_SIZE, 8);
+            AddAttrib(EGL_BLUE_SIZE, 8);
+            AddAttrib(EGL_GREEN_SIZE, 8);
+            AddAttrib(EGL_ALPHA_SIZE, 8);
+            break;
+
+        case wgpu::TextureFormat::RGB10A2Unorm:
+            AddAttrib(EGL_RED_SIZE, 10);
+            AddAttrib(EGL_BLUE_SIZE, 10);
+            AddAttrib(EGL_GREEN_SIZE, 10);
+            AddAttrib(EGL_ALPHA_SIZE, 2);
+            break;
+
+        case wgpu::TextureFormat::RGBA16Float:
+            if (!egl.HasExt(EGLExt::PixelFormatFloat)) {
+                return kNoConfig;
+            }
+            AddAttrib(EGL_RED_SIZE, 16);
+            AddAttrib(EGL_BLUE_SIZE, 16);
+            AddAttrib(EGL_GREEN_SIZE, 16);
+            AddAttrib(EGL_ALPHA_SIZE, 16);
+            AddAttrib(EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT);
+            break;
+
+        default:
+            return kNoConfig;
+    }
+
+    switch (depthStencil) {
+        case wgpu::TextureFormat::Depth24PlusStencil8:
+            AddAttrib(EGL_DEPTH_SIZE, 24);
+            AddAttrib(EGL_STENCIL_SIZE, 8);
+            break;
+        case wgpu::TextureFormat::Depth16Unorm:
+            AddAttrib(EGL_DEPTH_SIZE, 16);
+            break;
+        case wgpu::TextureFormat::Undefined:
+            break;
+
+        default:
+            return kNoConfig;
+    }
+
+    // The attrib list is finished with an EGL_NONE tag.
+    attribs.push_back(EGL_NONE);
+
+    EGLConfig config = EGL_NO_CONFIG_KHR;
+    EGLint numConfigs = 0;
+    if (egl.ChooseConfig(mDisplay, attribs.data(), &config, 1, &numConfigs) == EGL_FALSE ||
+        numConfigs == 0) {
+        return kNoConfig;
+    }
+
+    return config;
 }
 
 }  // namespace dawn::native::opengl

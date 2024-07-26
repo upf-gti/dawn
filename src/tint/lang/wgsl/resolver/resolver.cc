@@ -681,17 +681,17 @@ sem::Variable* Resolver::Var(const ast::Var* var, bool is_global) {
                     global->Attributes().color = value.Get();
                     return kSuccess;
                 },
-                [&](const ast::BuiltinAttribute* attr) {
+                [&](const ast::BuiltinAttribute*) {
                     if (!has_io_address_space) {
                         return kInvalid;
                     }
-                    return BuiltinAttribute(attr) == Success ? kSuccess : kErrored;
+                    return kSuccess;
                 },
-                [&](const ast::InterpolateAttribute* attr) {
+                [&](const ast::InterpolateAttribute*) {
                     if (!has_io_address_space) {
                         return kInvalid;
                     }
-                    return InterpolateAttribute(attr) == Success ? kSuccess : kErrored;
+                    return kSuccess;
                 },
                 [&](const ast::InvariantAttribute* attr) {
                     if (!has_io_address_space) {
@@ -779,15 +779,11 @@ sem::Parameter* Resolver::Parameter(const ast::Parameter* param,
                     sem->Attributes().color = value.Get();
                     return true;
                 },
-                [&](const ast::BuiltinAttribute* attr) {
-                    return BuiltinAttribute(attr) == Success;
-                },
+                [&](const ast::BuiltinAttribute*) { return true; },
                 [&](const ast::InvariantAttribute* attr) -> bool {
                     return InvariantAttribute(attr);
                 },
-                [&](const ast::InterpolateAttribute* attr) {
-                    return InterpolateAttribute(attr) == Success;
-                },
+                [&](const ast::InterpolateAttribute*) { return true; },
                 [&](const ast::InternalAttribute* attr) -> bool { return InternalAttribute(attr); },
                 [&](const ast::GroupAttribute* attr) {
                     if (validator_.IsValidationEnabled(
@@ -1122,15 +1118,11 @@ sem::Function* Resolver::Function(const ast::Function* decl) {
                     func->SetReturnIndex(value.Get());
                     return kSuccess;
                 },
-                [&](const ast::BuiltinAttribute* attr) {
-                    return BuiltinAttribute(attr) == Success ? kSuccess : kErrored;
-                },
+                [&](const ast::BuiltinAttribute*) { return kSuccess; },
                 [&](const ast::InternalAttribute* attr) {
                     return InternalAttribute(attr) ? kSuccess : kErrored;
                 },
-                [&](const ast::InterpolateAttribute* attr) {
-                    return InterpolateAttribute(attr) == Success ? kSuccess : kErrored;
-                },
+                [&](const ast::InterpolateAttribute*) { return kSuccess; },
                 [&](const ast::InvariantAttribute* attr) {
                     return InvariantAttribute(attr) ? kSuccess : kErrored;
                 },
@@ -1672,11 +1664,6 @@ sem::BuiltinEnumExpression<core::AddressSpace>* Resolver::AddressSpaceExpression
     return address_space_expr;
 }
 
-sem::BuiltinEnumExpression<core::BuiltinValue>* Resolver::BuiltinValueExpression(
-    const ast::Expression* expr) {
-    return sem_.AsBuiltinValue(Expression(expr));
-}
-
 sem::BuiltinEnumExpression<core::TexelFormat>* Resolver::TexelFormatExpression(
     const ast::Expression* expr) {
     return sem_.AsTexelFormat(Expression(expr));
@@ -1684,16 +1671,6 @@ sem::BuiltinEnumExpression<core::TexelFormat>* Resolver::TexelFormatExpression(
 
 sem::BuiltinEnumExpression<core::Access>* Resolver::AccessExpression(const ast::Expression* expr) {
     return sem_.AsAccess(Expression(expr));
-}
-
-sem::BuiltinEnumExpression<core::InterpolationSampling>* Resolver::InterpolationSampling(
-    const ast::Expression* expr) {
-    return sem_.AsInterpolationSampling(Expression(expr));
-}
-
-sem::BuiltinEnumExpression<core::InterpolationType>* Resolver::InterpolationType(
-    const ast::Expression* expr) {
-    return sem_.AsInterpolationType(Expression(expr));
 }
 
 void Resolver::RegisterStore(const sem::ValueExpression* expr) {
@@ -3308,12 +3285,12 @@ sem::Expression* Resolver::Identifier(const ast::IdentifierExpression* expr) {
                     b.create<sem::VariableUser>(expr, stage, current_statement_, value, variable);
 
                 if (current_statement_) {
-                    // If identifier is part of a loop continuing block, make sure it
-                    // doesn't refer to a variable that is bypassed by a continue statement
-                    // in the loop's body block.
-                    if (auto* continuing_block =
-                            current_statement_
-                                ->FindFirstParent<sem::LoopContinuingBlockStatement>()) {
+                    // Check all parent continuing blocks to make sure that this is not a reference
+                    // to a variable that is bypassed by a continue statement in a loop's body
+                    // block.
+                    auto* continuing_block =
+                        current_statement_->FindFirstParent<sem::LoopContinuingBlockStatement>();
+                    while (continuing_block) {
                         auto* loop_block =
                             continuing_block->FindFirstParent<sem::LoopBlockStatement>();
                         if (loop_block->FirstContinue()) {
@@ -3334,6 +3311,9 @@ sem::Expression* Resolver::Identifier(const ast::IdentifierExpression* expr) {
                                 }
                             }
                         }
+                        continuing_block =
+                            continuing_block->Parent()
+                                ->FindFirstParent<sem::LoopContinuingBlockStatement>();
                     }
                 }
 
@@ -3402,29 +3382,6 @@ sem::Expression* Resolver::Identifier(const ast::IdentifierExpression* expr) {
         return CheckNotTemplated("address space", ident)
                    ? b.create<sem::BuiltinEnumExpression<core::AddressSpace>>(
                          expr, current_statement_, addr)
-                   : nullptr;
-    }
-
-    if (auto builtin = resolved->BuiltinValue(); builtin != core::BuiltinValue::kUndefined) {
-        return CheckNotTemplated("builtin value", ident)
-                   ? b.create<sem::BuiltinEnumExpression<core::BuiltinValue>>(
-                         expr, current_statement_, builtin)
-                   : nullptr;
-    }
-
-    if (auto i_smpl = resolved->InterpolationSampling();
-        i_smpl != core::InterpolationSampling::kUndefined) {
-        return CheckNotTemplated("interpolation sampling", ident)
-                   ? b.create<sem::BuiltinEnumExpression<core::InterpolationSampling>>(
-                         expr, current_statement_, i_smpl)
-                   : nullptr;
-    }
-
-    if (auto i_type = resolved->InterpolationType();
-        i_type != core::InterpolationType::kUndefined) {
-        return CheckNotTemplated("interpolation type", ident)
-                   ? b.create<sem::BuiltinEnumExpression<core::InterpolationType>>(
-                         expr, current_statement_, i_type)
                    : nullptr;
     }
 
@@ -3572,8 +3529,25 @@ sem::ValueExpression* Resolver::MemberAccessor(const ast::MemberAccessorExpressi
                 // the swizzle.
                 ty = b.create<core::type::Vector>(vec->type(), static_cast<uint32_t>(size));
 
-                // The load rule is invoked before the swizzle, if necessary.
-                obj_expr = Load(object);
+                if (obj_expr->Type()->Is<core::type::Pointer>()) {
+                    // If the LHS is a pointer, the load rule is invoked. We special case this
+                    // because our usual handling of implicit loads assumes the expression has
+                    // reference type. This expression also has an implicit dereference before the
+                    // load, but we have no way of representing that, so we create the load directly
+                    // from the pointer expression.
+                    auto* load =
+                        b.create<sem::Load>(obj_expr, current_statement_, obj_expr->Stage());
+                    load->Behaviors() = obj_expr->Behaviors();
+                    b.Sem().Replace(obj_expr->Declaration(), load);
+
+                    // Register the load for the alias analysis.
+                    RegisterLoad(obj_expr);
+
+                    obj_expr = load;
+                } else {
+                    // The load rule is invoked before the swizzle, if necessary.
+                    obj_expr = Load(obj_expr);
+                }
             }
             const core::constant::Value* val = nullptr;
             if (auto* obj_val = object->ConstantValue()) {
@@ -3635,6 +3609,10 @@ sem::ValueExpression* Resolver::Binary(const ast::BinaryExpression* expr) {
         if (!rhs) {
             return nullptr;
         }
+    }
+
+    if (!validator_.BinaryExpression(expr, expr->op, lhs, rhs)) {
+        return nullptr;
     }
 
     const core::constant::Value* value = nullptr;
@@ -4013,18 +3991,6 @@ tint::Result<sem::WorkgroupSize> Resolver::WorkgroupAttribute(const ast::Workgro
     return ws;
 }
 
-tint::Result<tint::core::BuiltinValue> Resolver::BuiltinAttribute(
-    const ast::BuiltinAttribute* attr) {
-    auto* builtin_expr = BuiltinValueExpression(attr->builtin);
-    if (!builtin_expr) {
-        return Failure{};
-    }
-    // Apply the resolved tint::sem::BuiltinEnumExpression<tint::core::BuiltinValue> to the
-    // attribute.
-    b.Sem().Add(attr, builtin_expr);
-    return builtin_expr->Value();
-}
-
 bool Resolver::DiagnosticAttribute(const ast::DiagnosticAttribute* attr) {
     return DiagnosticControl(attr->control);
 }
@@ -4043,24 +4009,6 @@ bool Resolver::InvariantAttribute(const ast::InvariantAttribute*) {
 
 bool Resolver::StrideAttribute(const ast::StrideAttribute*) {
     return true;
-}
-
-tint::Result<core::Interpolation> Resolver::InterpolateAttribute(
-    const ast::InterpolateAttribute* attr) {
-    core::Interpolation out;
-    auto* type = InterpolationType(attr->type);
-    if (!type) {
-        return Failure{};
-    }
-    out.type = type->Value();
-    if (attr->sampling) {
-        auto* sampling = InterpolationSampling(attr->sampling);
-        if (!sampling) {
-            return Failure{};
-        }
-        out.sampling = sampling->Value();
-    }
-    return out;
 }
 
 bool Resolver::InternalAttribute(const ast::InternalAttribute* attr) {
@@ -4380,7 +4328,7 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
         bool has_offset_attr = false;
         bool has_align_attr = false;
         bool has_size_attr = false;
-        core::type::StructMemberAttributes attributes;
+        core::IOAttributes attributes;
         for (auto* attribute : member->attributes) {
             Mark(attribute);
             bool ok = Switch(
@@ -4508,19 +4456,11 @@ sem::Struct* Resolver::Structure(const ast::Struct* str) {
                     return true;
                 },
                 [&](const ast::BuiltinAttribute* attr) {
-                    auto value = BuiltinAttribute(attr);
-                    if (value != Success) {
-                        return false;
-                    }
-                    attributes.builtin = value.Get();
+                    attributes.builtin = attr->builtin;
                     return true;
                 },
                 [&](const ast::InterpolateAttribute* attr) {
-                    auto value = InterpolateAttribute(attr);
-                    if (value != Success) {
-                        return false;
-                    }
-                    attributes.interpolation = value.Get();
+                    attributes.interpolation = attr->interpolation;
                     return true;
                 },
                 [&](const ast::InvariantAttribute* attr) {

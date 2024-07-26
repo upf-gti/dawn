@@ -26,30 +26,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ###############################################################################
-# Dawn projects
-###############################################################################
-
-add_subdirectory(partition_alloc)
-add_subdirectory(common)
-add_subdirectory(platform)
-add_subdirectory(native)
-add_subdirectory(wire)
-add_subdirectory(utils)
-
-if (DAWN_BUILD_BENCHMARKS)
-    add_subdirectory(tests/benchmarks)
-endif()
-if(DAWN_USE_GLFW)
-    add_subdirectory(glfw)
-endif()
-if (DAWN_BUILD_SAMPLES)
-    add_subdirectory(samples)
-endif()
-if (DAWN_BUILD_NODE_BINDINGS)
-    add_subdirectory(node)
-endif()
-
-###############################################################################
 # Dawn headers
 ###############################################################################
 
@@ -69,7 +45,12 @@ dawn_add_library(
     DEPENDS
         dawn_public_config
 )
-install_if_enabled(dawn_headers)
+
+if (${DAWN_ENABLE_EMSCRIPTEN})
+  add_library(webgpu_c ALIAS emdawnwebgpu_c)
+else()
+  add_library(webgpu_c ALIAS dawn_headers)
+endif()
 
 ###############################################################################
 # Dawn C++ headers
@@ -91,39 +72,71 @@ dawn_add_library(
     DEPENDS
         dawn::dawn_headers
 )
-install_if_enabled(dawncpp_headers)
 
-add_library(dawncpp ALIAS dawncpp_headers)
-add_library(webgpu_cpp ALIAS dawncpp_headers)
+if (${DAWN_ENABLE_EMSCRIPTEN})
+  add_library(webgpu_cpp ALIAS emdawnwebgpu_cpp)
+else()
+  add_library(dawncpp ALIAS dawncpp_headers)
+  add_library(webgpu_cpp ALIAS dawncpp_headers)
+endif()
+
+###############################################################################
+# Dawn projects
+###############################################################################
+
+add_subdirectory(partition_alloc)
+add_subdirectory(common)
+add_subdirectory(utils)
+# Only build the rest of Dawn when Emscripten is not the target environment.
+if (NOT ${DAWN_ENABLE_EMSCRIPTEN})
+  add_subdirectory(platform)
+  add_subdirectory(wire)
+  add_subdirectory(native)
+endif()
+
+if (DAWN_BUILD_BENCHMARKS)
+  add_subdirectory(tests/benchmarks)
+endif()
+if(DAWN_USE_GLFW)
+  add_subdirectory(glfw)
+endif()
+if (DAWN_BUILD_SAMPLES)
+  add_subdirectory(samples)
+endif()
+if (DAWN_BUILD_NODE_BINDINGS)
+  add_subdirectory(node)
+endif()
 
 ###############################################################################
 # libdawn_proc
+#   Only built when not building for Emscripten
 ###############################################################################
 
-DawnJSONGenerator(
-    TARGET "proc"
-    PRINT_NAME "Dawn C++ wrapper"
-    OUTPUT_SOURCES DAWNPROC_GEN_SOURCES
-)
+if (NOT ${DAWN_ENABLE_EMSCRIPTEN})
+  DawnJSONGenerator(
+      TARGET "proc"
+      PRINT_NAME "Dawn C++ wrapper"
+      OUTPUT_SOURCES DAWNPROC_GEN_SOURCES
+  )
 
-dawn_add_library(
-  dawn_proc
-  UTILITY_TARGET dawn_internal_config
-  HEADERS
-    "${DAWN_INCLUDE_DIR}/dawn/dawn_thread_dispatch_proc.h"
-    "${DAWN_INCLUDE_DIR}/dawn/dawn_proc.h"
-  SOURCES
-    "${DAWNPROC_GEN_SOURCES}"
-  DEPENDS
-    dawn::dawn_headers
-  PRIVATE_DEPENDS
-    dawn::dawn_common
-)
-target_compile_definitions(dawn_proc PRIVATE "WGPU_IMPLEMENTATION")
-if(BUILD_SHARED_LIBS)
-  target_compile_definitions(dawn_proc PUBLIC "WGPU_SHARED_LIBRARY")
+  dawn_add_library(
+    dawn_proc
+    UTILITY_TARGET dawn_internal_config
+    HEADERS
+      "${DAWN_INCLUDE_DIR}/dawn/dawn_thread_dispatch_proc.h"
+      "${DAWN_INCLUDE_DIR}/dawn/dawn_proc.h"
+    SOURCES
+      "${DAWNPROC_GEN_SOURCES}"
+    DEPENDS
+      dawn::dawn_headers
+    PRIVATE_DEPENDS
+      dawn::dawn_common
+  )
+  target_compile_definitions(dawn_proc PRIVATE "WGPU_IMPLEMENTATION")
+  if(BUILD_SHARED_LIBS)
+    target_compile_definitions(dawn_proc PUBLIC "WGPU_SHARED_LIBRARY")
+  endif()
 endif()
-install_if_enabled(dawn_proc)
 
 ###############################################################################
 # Other generated files (upstream header, emscripten header, emscripten bits)
@@ -136,16 +149,4 @@ DawnJSONGenerator(
 )
 add_custom_target(webgpu_headers_gen
     DEPENDS ${WEBGPU_HEADERS_GEN_HEADERS}
-)
-
-DawnJSONGenerator(
-    TARGET "emscripten_bits"
-    PRINT_NAME "Emscripten WebGPU bits"
-    OUTPUT_HEADERS EMSCRIPTEN_BITS_GEN_HEADERS
-    OUTPUT_SOURCES EMSCRIPTEN_BITS_GEN_SOURCES
-)
-add_custom_target(emscripten_bits_gen
-    DEPENDS
-        ${EMSCRIPTEN_BITS_GEN_HEADERS}
-        ${EMSCRIPTEN_BITS_GEN_SOURCES}
 )

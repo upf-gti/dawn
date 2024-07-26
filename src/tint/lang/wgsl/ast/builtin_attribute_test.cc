@@ -36,26 +36,7 @@ using BuiltinAttributeDeathTest = BuiltinAttributeTest;
 
 TEST_F(BuiltinAttributeTest, Creation) {
     auto* d = Builtin(core::BuiltinValue::kFragDepth);
-    CheckIdentifier(d->builtin, "frag_depth");
-}
-
-TEST_F(BuiltinAttributeDeathTest, Assert_Null_Builtin) {
-    EXPECT_DEATH_IF_SUPPORTED(
-        {
-            ProgramBuilder b;
-            b.Builtin(nullptr);
-        },
-        "internal compiler error");
-}
-
-TEST_F(BuiltinAttributeDeathTest, Assert_DifferentGenerationID_Builtin) {
-    EXPECT_DEATH_IF_SUPPORTED(
-        {
-            ProgramBuilder b1;
-            ProgramBuilder b2;
-            b1.Builtin(b2.Expr("bang"));
-        },
-        "internal compiler error");
+    EXPECT_EQ(d->builtin, core::BuiltinValue::kFragDepth);
 }
 
 }  // namespace

@@ -27,8 +27,6 @@
 
 #include "src/tint/lang/core/ir/transform/demote_to_helper.h"
 
-#include <utility>
-
 #include "src/tint/lang/core/ir/builder.h"
 #include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/core/ir/validator.h"
@@ -216,7 +214,10 @@ struct State {
 }  // namespace
 
 Result<SuccessType> DemoteToHelper(Module& ir) {
-    auto result = ValidateAndDumpIfNeeded(ir, "DemoteToHelper transform");
+    auto result = ValidateAndDumpIfNeeded(ir, "DemoteToHelper transform",
+                                          core::ir::Capabilities{
+                                              core::ir::Capability::kAllowVectorElementPointer,
+                                          });
     if (result != Success) {
         return result;
     }

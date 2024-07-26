@@ -83,19 +83,18 @@ void WireTest::SetUp() {
     dawnProcSetProcs(&dawn::wire::client::GetProcs());
 
     auto reservedInstance = GetWireClient()->ReserveInstance();
-    instance = reservedInstance.instance;
+    instance = wgpu::Instance::Acquire(reservedInstance.instance);
     apiInstance = api.GetNewInstance();
     EXPECT_CALL(api, InstanceAddRef(apiInstance));
     EXPECT_TRUE(GetWireServer()->InjectInstance(apiInstance, reservedInstance.handle));
 
     // Create the adapter for testing.
     apiAdapter = api.GetNewAdapter();
-    WGPURequestAdapterOptions adapterOpts = {};
-    MockCallback<WGPURequestAdapterCallback2> adapterCb;
-    wgpuInstanceRequestAdapter2(instance, &adapterOpts,
-                                {nullptr, WGPUCallbackMode_AllowSpontaneous, adapterCb.Callback(),
-                                 nullptr, adapterCb.MakeUserdata(this)});
-    EXPECT_CALL(api, OnInstanceRequestAdapter2(apiInstance, NotNull(), _)).WillOnce([&]() {
+    MockCallback<void (*)(wgpu::RequestAdapterStatus, wgpu::Adapter, const char*, void*)> adapterCb;
+    instance.RequestAdapter(nullptr, wgpu::CallbackMode::AllowSpontaneous, adapterCb.Callback(),
+                            adapterCb.MakeUserdata(this));
+
+    EXPECT_CALL(api, OnInstanceRequestAdapter2(apiInstance, _, _)).WillOnce([&]() {
         EXPECT_CALL(api, AdapterHasFeature(apiAdapter, _)).WillRepeatedly(Return(false));
 
         EXPECT_CALL(api, AdapterGetInfo(apiAdapter, NotNull()))
@@ -105,16 +104,6 @@ void WireTest::SetUp() {
                 info->architecture = "";
                 info->device = "";
                 info->description = "";
-                return WGPUStatus_Success;
-            })));
-
-        EXPECT_CALL(api, AdapterGetProperties(apiAdapter, NotNull()))
-            .WillOnce(WithArg<1>(Invoke([&](WGPUAdapterProperties* properties) {
-                *properties = {};
-                properties->vendorName = "";
-                properties->architecture = "";
-                properties->name = "";
-                properties->driverDescription = "";
                 return WGPUStatus_Success;
             })));
 
@@ -132,28 +121,24 @@ void WireTest::SetUp() {
                                                 apiAdapter, nullptr);
     });
     FlushClient();
-    WGPUAdapter cAdapter = nullptr;
-    EXPECT_CALL(adapterCb,
-                Call(WGPURequestAdapterStatus_Success, NotNull(), nullptr, nullptr, this))
-        .WillOnce(SaveArg<1>(&cAdapter));
+    EXPECT_CALL(adapterCb, Call(wgpu::RequestAdapterStatus::Success, NotNull(), nullptr, this))
+        .WillOnce(SaveArg<1>(&adapter));
     FlushServer();
-    EXPECT_NE(cAdapter, nullptr);
-    adapter = wgpu::Adapter::Acquire(cAdapter);
+    EXPECT_NE(adapter, nullptr);
 
     // Create the device for testing.
     apiDevice = api.GetNewDevice();
-    WGPUDeviceDescriptor deviceDesc = {};
-    deviceDesc.deviceLostCallbackInfo2 = {nullptr, WGPUCallbackMode_AllowSpontaneous,
-                                          deviceLostCallback.Callback(), nullptr,
-                                          deviceLostCallback.MakeUserdata(this)};
-    deviceDesc.uncapturedErrorCallbackInfo2 = {nullptr, uncapturedErrorCallback.Callback(), nullptr,
-                                               uncapturedErrorCallback.MakeUserdata(this)};
+    wgpu::DeviceDescriptor deviceDesc = {};
+    deviceDesc.deviceLostCallbackInfo = {nullptr, wgpu::CallbackMode::AllowSpontaneous,
+                                         deviceLostCallback.Callback(),
+                                         deviceLostCallback.MakeUserdata(this)};
+    deviceDesc.uncapturedErrorCallbackInfo = {nullptr, uncapturedErrorCallback.Callback(),
+                                              uncapturedErrorCallback.MakeUserdata(this)};
     EXPECT_CALL(deviceLostCallback, Call).Times(AtMost(1));
 
-    MockCallback<WGPURequestDeviceCallback2> deviceCb;
-    wgpuAdapterRequestDevice2(adapter.Get(), &deviceDesc,
-                              {nullptr, WGPUCallbackMode_AllowSpontaneous, deviceCb.Callback(),
-                               nullptr, deviceCb.MakeUserdata(this)});
+    MockCallback<void (*)(wgpu::RequestDeviceStatus, wgpu::Device, const char*, void*)> deviceCb;
+    adapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::AllowSpontaneous, deviceCb.Callback(),
+                          deviceCb.MakeUserdata(this));
     EXPECT_CALL(api, OnAdapterRequestDevice2(apiAdapter, NotNull(), _))
         .WillOnce(WithArg<1>([&](const WGPUDeviceDescriptor* desc) {
             // Set on device creation to forward callbacks to the client.
@@ -184,27 +169,26 @@ void WireTest::SetUp() {
                                                   apiDevice, nullptr);
         }));
     FlushClient();
-    EXPECT_CALL(deviceCb, Call(WGPURequestDeviceStatus_Success, NotNull(), nullptr, nullptr, this))
+    EXPECT_CALL(deviceCb, Call(wgpu::RequestDeviceStatus::Success, NotNull(), nullptr, this))
         .WillOnce(SaveArg<1>(&device));
     FlushServer();
     EXPECT_NE(device, nullptr);
 
     // The GetQueue is done on WireClient startup so we expect it now.
-    queue = wgpuDeviceGetQueue(device);
+    queue = device.GetQueue();
     apiQueue = api.GetNewQueue();
     EXPECT_CALL(api, DeviceGetQueue(apiDevice)).WillOnce(Return(apiQueue));
     FlushClient();
+
+    cDevice = device.Get();
+    cQueue = queue.Get();
 }
 
 void WireTest::TearDown() {
-    // Drop last refs on objects.
-    if (apiAdapter) {
-        adapter = nullptr;
-    } else {
-        // Don't call release on the C++ wrapper if the C objects are already destroyed.
-        adapter.MoveToCHandle();
-    }
-
+    instance = nullptr;
+    adapter = nullptr;
+    device = nullptr;
+    queue = nullptr;
     dawnProcSetProcs(nullptr);
 
     // Derived classes should call the base TearDown() first. The client must

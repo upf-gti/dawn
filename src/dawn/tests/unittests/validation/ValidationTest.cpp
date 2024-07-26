@@ -25,7 +25,10 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <webgpu/webgpu.h>
+
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -38,7 +41,6 @@
 #include "dawn/tests/ToggleParser.h"
 #include "dawn/tests/unittests/validation/ValidationTest.h"
 #include "dawn/utils/WireHelper.h"
-#include "dawn/webgpu.h"
 
 namespace {
 
@@ -303,20 +305,38 @@ dawn::utils::WireHelper* ValidationTest::GetWireHelper() const {
     return mWireHelper.get();
 }
 
+uint32_t ValidationTest::GetDeviceCreationDeprecationWarningExpectation(
+    const wgpu::DeviceDescriptor& descriptor) {
+    uint32_t expectedDeprecatedCount = 0;
+
+    std::unordered_set<wgpu::FeatureName> requiredFeatureSet;
+    for (uint32_t i = 0; i < descriptor.requiredFeatureCount; ++i) {
+        requiredFeatureSet.insert(descriptor.requiredFeatures[i]);
+    }
+    // ChromiumExperimentalSubgroups feature is deprecated.
+    // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
+    if (requiredFeatureSet.count(wgpu::FeatureName::ChromiumExperimentalSubgroups)) {
+        expectedDeprecatedCount++;
+    }
+
+    return expectedDeprecatedCount;
+}
+
 wgpu::Device ValidationTest::RequestDeviceSync(const wgpu::DeviceDescriptor& deviceDesc) {
     DAWN_ASSERT(adapter);
 
     wgpu::Device apiDevice;
-    adapter.RequestDevice(
-        &deviceDesc, wgpu::CallbackMode::AllowSpontaneous,
-        [&apiDevice](wgpu::RequestDeviceStatus status, wgpu::Device result, const char* message) {
-            if (status != wgpu::RequestDeviceStatus::Success) {
-                ADD_FAILURE() << "Unable to create device: " << message;
-                DAWN_ASSERT(false);
-            }
-            apiDevice = std::move(result);
-        });
-    FlushWire();
+    EXPECT_DEPRECATION_WARNINGS(
+        adapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::AllowSpontaneous,
+                              [&apiDevice](wgpu::RequestDeviceStatus status, wgpu::Device result,
+                                           const char* message) {
+                                  if (status != wgpu::RequestDeviceStatus::Success) {
+                                      ADD_FAILURE() << "Unable to create device: " << message;
+                                      DAWN_ASSERT(false);
+                                  }
+                                  apiDevice = std::move(result);
+                              }),
+        GetDeviceCreationDeprecationWarningExpectation(deviceDesc));
 
     DAWN_ASSERT(apiDevice);
     return apiDevice;

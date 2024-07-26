@@ -987,7 +987,7 @@ bool Validator::BuiltinAttribute(const ast::BuiltinAttribute* attr,
     auto* type = storage_ty->UnwrapRef();
     bool is_stage_mismatch = false;
     bool is_output = !is_input;
-    auto builtin = sem_.Get(attr)->Value();
+    auto builtin = attr->builtin;
 
     auto err_builtin_type = [&](std::string_view required) {
         AddError(attr->source) << "store type of " << style::Attribute("@builtin")
@@ -1066,9 +1066,9 @@ bool Validator::BuiltinAttribute(const ast::BuiltinAttribute* attr,
             break;
         case core::BuiltinValue::kSampleMask:
             if (mode_ == wgsl::ValidationMode::kCompat) {
-                AddError(attr->builtin->source) << "use of " << style::Attribute("@builtin")
-                                                << style::Code("(", style::Enum(builtin), ")")
-                                                << " is not allowed in compatibility mode";
+                AddError(attr->source) << "use of " << style::Attribute("@builtin")
+                                       << style::Code("(", style::Enum(builtin), ")")
+                                       << " is not allowed in compatibility mode";
                 return false;
             }
             if (stage != ast::PipelineStage::kNone && !(stage == ast::PipelineStage::kFragment)) {
@@ -1081,9 +1081,9 @@ bool Validator::BuiltinAttribute(const ast::BuiltinAttribute* attr,
             break;
         case core::BuiltinValue::kSampleIndex:
             if (mode_ == wgsl::ValidationMode::kCompat) {
-                AddError(attr->builtin->source) << "use of " << style::Attribute("@builtin")
-                                                << style::Code("(", style::Enum(builtin), ")")
-                                                << " is not allowed in compatibility mode";
+                AddError(attr->source) << "use of " << style::Attribute("@builtin")
+                                       << style::Code("(", style::Enum(builtin), ")")
+                                       << " is not allowed in compatibility mode";
                 return false;
             }
             if (stage != ast::PipelineStage::kNone &&
@@ -1109,7 +1109,8 @@ bool Validator::BuiltinAttribute(const ast::BuiltinAttribute* attr,
                 err_builtin_type("u32");
                 return false;
             }
-            if (stage != ast::PipelineStage::kNone && stage != ast::PipelineStage::kCompute) {
+            if (stage != ast::PipelineStage::kNone &&
+                !(stage == ast::PipelineStage::kCompute && is_input)) {
                 AddError(attr->source)
                     << style::Attribute("@builtin") << style::Code("(", style::Enum(builtin), ")")
                     << " is only valid as a compute shader input";
@@ -1142,38 +1143,62 @@ bool Validator::InterpolateAttribute(const ast::InterpolateAttribute* attr,
 
     auto* type = storage_ty->UnwrapRef();
 
-    auto i_type = sem_.AsInterpolationType(sem_.Get(attr->type));
-    if (TINT_UNLIKELY(!i_type)) {
+    auto i_type = attr->interpolation.type;
+    auto i_sampling = attr->interpolation.sampling;
+    if (TINT_UNLIKELY(i_type == core::InterpolationType::kUndefined)) {
         return false;
     }
 
-    if (type->is_integer_scalar_or_vector() && i_type->Value() != core::InterpolationType::kFlat) {
+    if (type->is_integer_scalar_or_vector() && i_type != core::InterpolationType::kFlat) {
         AddError(attr->source) << "interpolation type must be " << style::Enum("flat")
                                << " for integral user-defined IO types";
         return false;
     }
 
-    if (attr->sampling && i_type->Value() == core::InterpolationType::kFlat) {
-        AddError(attr->source) << "flat interpolation attribute must not have a sampling parameter";
-        return false;
-    }
+    if (i_sampling != core::InterpolationSampling::kUndefined) {
+        bool is_first_or_either = i_sampling == core::InterpolationSampling::kFirst ||
+                                  i_sampling == core::InterpolationSampling::kEither;
 
-    if (mode_ == wgsl::ValidationMode::kCompat) {
-        if (i_type->Value() == core::InterpolationType::kLinear) {
-            AddError(attr->source)
-                << "use of '@interpolate(linear)' is not allowed in compatibility mode";
-            return false;
-        }
+        if (i_type == core::InterpolationType::kFlat) {
+            if (!is_first_or_either) {
+                AddError(attr->source)
+                    << "flat interpolation can only use 'first' and 'either' sampling parameters";
+                return false;
+            }
+            if (mode_ == wgsl::ValidationMode::kCompat &&
+                i_sampling == core::InterpolationSampling::kFirst) {
+                AddError(attr->source) << "flat interpolation must use 'either' sampling parameter "
+                                          "in compatibility mode";
+                return false;
+            }
+        } else {
+            if (is_first_or_either) {
+                AddError(attr->source) << "'first' and 'either' sampling parameters can only be "
+                                          "used with flat interpolation";
+                return false;
+            }
 
-        if (attr->sampling) {
-            auto s_type = sem_.AsInterpolationSampling(sem_.Get(attr->sampling));
-            if (s_type->Value() == core::InterpolationSampling::kSample) {
+            if (mode_ == wgsl::ValidationMode::kCompat &&
+                i_sampling == core::InterpolationSampling::kSample) {
                 AddError(attr->source)
                     << "use of '@interpolate(..., sample)' is not allowed in compatibility mode";
                 return false;
             }
         }
+    } else {
+        if (mode_ == wgsl::ValidationMode::kCompat && i_type == core::InterpolationType::kFlat) {
+            AddError(attr->source)
+                << "flat interpolation must use 'either' sampling parameter in compatibility mode";
+            return false;
+        }
     }
+
+    if (mode_ == wgsl::ValidationMode::kCompat && i_type == core::InterpolationType::kLinear) {
+        AddError(attr->source)
+            << "use of '@interpolate(linear)' is not allowed in compatibility mode";
+        return false;
+    }
+
     return true;
 }
 
@@ -1299,7 +1324,7 @@ bool Validator::EntryPoint(const sem::Function* func, ast::PipelineStage stage) 
             bool ok = Switch(
                 attr,  //
                 [&](const ast::BuiltinAttribute* builtin_attr) {
-                    auto builtin = sem_.Get(builtin_attr)->Value();
+                    auto builtin = builtin_attr->builtin;
 
                     if (pipeline_io_attribute) {
                         AddError(attr->source) << "multiple entry point IO attributes";
@@ -1462,8 +1487,7 @@ bool Validator::EntryPoint(const sem::Function* func, ast::PipelineStage stage) 
                 bool has_position = false;
                 if (pipeline_io_attribute) {
                     if (auto* builtin_attr = pipeline_io_attribute->As<ast::BuiltinAttribute>()) {
-                        auto builtin = sem_.Get(builtin_attr)->Value();
-                        has_position = (builtin == core::BuiltinValue::kPosition);
+                        has_position = (builtin_attr->builtin == core::BuiltinValue::kPosition);
                     }
                 }
                 if (!has_position) {
@@ -1537,8 +1561,7 @@ bool Validator::EntryPoint(const sem::Function* func, ast::PipelineStage stage) 
         for (auto* global : func->TransitivelyReferencedGlobals()) {
             if (auto* builtin_attr =
                     ast::GetAttribute<ast::BuiltinAttribute>(global->Declaration()->attributes)) {
-                auto builtin = sem_.Get(builtin_attr)->Value();
-                if (builtin == core::BuiltinValue::kPosition) {
+                if (builtin_attr->builtin == core::BuiltinValue::kPosition) {
                     found = true;
                     break;
                 }
@@ -1647,6 +1670,52 @@ bool Validator::Statements(VectorRef<const ast::Statement*> stmts) const {
         }
     }
     return true;
+}
+
+bool Validator::BinaryExpression(const ast::Node* node,
+                                 const core::BinaryOp op,
+                                 const tint::sem::ValueExpression* lhs,
+                                 const tint::sem::ValueExpression* rhs) const {
+    switch (op) {
+        case core::BinaryOp::kShiftLeft:
+        case core::BinaryOp::kShiftRight: {
+            // If lhs value is a concrete type, and rhs is a const-expression greater than or equal
+            // to the bit width of lhs, then it is a shader-creation error.
+            const auto* elem_type = lhs->Type()->UnwrapRef()->DeepestElement();
+            if (!elem_type->HoldsAbstract() && rhs->Stage() == core::EvaluationStage::kConstant) {
+                const uint32_t bit_width = elem_type->Size() * 8;
+                auto* rhs_val = rhs->ConstantValue();
+                for (size_t i = 0, n = rhs_val->NumElements(); i < n; i++) {
+                    auto* shift_val = n == 1 ? rhs_val : rhs_val->Index(i);
+                    if (shift_val->ValueAs<u32>() >= bit_width) {
+                        AddError(node->source)
+                            << "shift " << (op == core::BinaryOp::kShiftLeft ? "left" : "right")
+                            << " value must be less than the bit width of the lhs, which is "
+                            << bit_width;
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        case core::BinaryOp::kDivide:
+        case core::BinaryOp::kModulo: {
+            // Integer division by zero should be checked for the partial evaluation case (only rhs
+            // is const). FP division by zero is only invalid when the whole expression is
+            // constant-evaluated.
+            if (rhs->Type()->is_integer_scalar_or_vector() &&
+                rhs->Stage() == core::EvaluationStage::kConstant) {
+                if (rhs->ConstantValue()->AnyZero()) {
+                    AddError(node->source) << "integer division by zero is invalid";
+                    return false;
+                }
+            }
+            return true;
+        }
+        default: {
+            return true;
+        }
+    }
 }
 
 bool Validator::BreakStatement(const sem::Statement* stmt,
@@ -2404,8 +2473,7 @@ bool Validator::Structure(const sem::Struct* str, ast::PipelineStage stage) cons
                                           /* is_input */ false)) {
                         return false;
                     }
-                    auto builtin = sem_.Get(builtin_attr)->Value();
-                    if (builtin == core::BuiltinValue::kPosition) {
+                    if (builtin_attr->builtin == core::BuiltinValue::kPosition) {
                         has_position = true;
                     }
                     return true;
@@ -2699,6 +2767,9 @@ bool Validator::Assignment(const ast::Statement* a, const core::type::Type* rhs_
     } else if (auto* compound = a->As<ast::CompoundAssignmentStatement>()) {
         lhs = compound->lhs;
         rhs = compound->rhs;
+        if (!BinaryExpression(a, compound->op, sem_.GetVal(lhs), sem_.GetVal(rhs))) {
+            return false;
+        }
     } else {
         TINT_ICE() << "invalid assignment statement";
     }

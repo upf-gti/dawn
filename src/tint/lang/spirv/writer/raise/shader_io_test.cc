@@ -74,10 +74,11 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_NonStruct) {
     position->SetBuiltin(core::BuiltinValue::kPosition);
     position->SetInvariant(true);
     auto* color1 = b.FunctionParam("color1", ty.f32());
-    color1->SetLocation(0, {});
+    color1->SetLocation(0);
     auto* color2 = b.FunctionParam("color2", ty.f32());
-    color2->SetLocation(1, core::Interpolation{core::InterpolationType::kLinear,
-                                               core::InterpolationSampling::kSample});
+    color2->SetLocation(1);
+    color2->SetInterpolation(core::Interpolation{core::InterpolationType::kLinear,
+                                                 core::InterpolationSampling::kSample});
 
     ep->SetParams({front_facing, position, color1, color2});
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
@@ -152,7 +153,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("front_facing"),
                                      ty.bool_(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -164,7 +165,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -176,7 +177,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -188,7 +189,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Struct) {
                                  {
                                      mod.symbols.New("color2"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 1u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -304,7 +305,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Mixed) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -316,7 +317,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Mixed) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -332,8 +333,9 @@ TEST_F(SpirvWriter_ShaderIOTest, Parameters_Mixed) {
     front_facing->SetBuiltin(core::BuiltinValue::kFrontFacing);
     auto* str_param = b.FunctionParam("inputs", str_ty);
     auto* color2 = b.FunctionParam("color2", ty.f32());
-    color2->SetLocation(1, core::Interpolation{core::InterpolationType::kLinear,
-                                               core::InterpolationSampling::kSample});
+    color2->SetLocation(1);
+    color2->SetInterpolation(core::Interpolation{core::InterpolationType::kLinear,
+                                                 core::InterpolationSampling::kSample});
 
     ep->SetParams({front_facing, str_param, color2});
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
@@ -468,7 +470,7 @@ $B1: {  # root
 
 TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_NonStructLocation) {
     auto* ep = b.Function("foo", ty.vec4<f32>());
-    ep->SetReturnLocation(1u, {});
+    ep->SetReturnLocation(1u);
     ep->SetStage(core::ir::Function::PipelineStage::kFragment);
 
     b.Append(ep->Block(), [&] {  //
@@ -518,7 +520,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("position"),
                                      ty.vec4<f32>(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -530,7 +532,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("color1"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -542,7 +544,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_Struct) {
                                  {
                                      mod.symbols.New("color2"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 1u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -628,7 +630,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_DualSourceBlending) {
                                                  {
                                                      mod.symbols.New("color1"),
                                                      ty.f32(),
-                                                     core::type::StructMemberAttributes{
+                                                     core::IOAttributes{
                                                          /* location */ 0u,
                                                          /* blend_src */ 0u,
                                                          /* color */ std::nullopt,
@@ -640,7 +642,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ReturnValue_DualSourceBlending) {
                                                  {
                                                      mod.symbols.New("color2"),
                                                      ty.f32(),
-                                                     core::type::StructMemberAttributes{
+                                                     core::IOAttributes{
                                                          /* location */ 0u,
                                                          /* blend_src */ 1u,
                                                          /* color */ std::nullopt,
@@ -716,7 +718,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
                                  {
                                      mod.symbols.New("position"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -728,7 +730,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
                                  {
                                      mod.symbols.New("color"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -757,7 +759,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedByVertexAndFragment) {
         auto* inputs = b.FunctionParam("inputs", str_ty);
         ep->SetStage(core::ir::Function::PipelineStage::kFragment);
         ep->SetParams({inputs});
-        ep->SetReturnLocation(0u, {});
+        ep->SetReturnLocation(0u);
 
         b.Append(ep->Block(), [&] {  //
             auto* position = b.Access(vec4f, inputs, 0_u);
@@ -857,7 +859,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                  {
                                      mod.symbols.New("position"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -869,7 +871,7 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                  {
                                      mod.symbols.New("color"),
                                      vec4f,
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -880,7 +882,9 @@ TEST_F(SpirvWriter_ShaderIOTest, Struct_SharedWithBuffer) {
                                  },
                              });
 
-    auto* buffer = mod.root_block->Append(b.Var(ty.ptr(storage, str_ty, read)));
+    auto* var = b.Var(ty.ptr(storage, str_ty, read));
+    var->SetBindingPoint(0, 0);
+    auto* buffer = mod.root_block->Append(var);
 
     auto* ep = b.Function("vert", str_ty);
     ep->SetStage(core::ir::Function::PipelineStage::kVertex);
@@ -896,7 +900,7 @@ Outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
 }
 
 %vert = @vertex func():Outputs {
@@ -915,7 +919,7 @@ Outputs = struct @align(16) {
 }
 
 $B1: {  # root
-  %1:ptr<storage, Outputs, read> = var
+  %1:ptr<storage, Outputs, read> = var @binding_point(0, 0)
   %vert_position_Output:ptr<__out, vec4<f32>, write> = var @builtin(position)
   %vert_loc0_Output:ptr<__out, vec4<f32>, write> = var @location(0)
 }
@@ -952,7 +956,7 @@ TEST_F(SpirvWriter_ShaderIOTest, SampleMask) {
                                  {
                                      mod.symbols.New("color"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -964,7 +968,7 @@ TEST_F(SpirvWriter_ShaderIOTest, SampleMask) {
                                  {
                                      mod.symbols.New("mask"),
                                      ty.u32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -1048,7 +1052,7 @@ TEST_F(SpirvWriter_ShaderIOTest, InterpolationOnVertexInputOrFragmentOutput) {
                                                    {
                                                        mod.symbols.New("color"),
                                                        ty.f32(),
-                                                       core::type::StructMemberAttributes{
+                                                       core::IOAttributes{
                                                            /* location */ 1u,
                                                            /* blend_src */ std::nullopt,
                                                            /* color */ std::nullopt,
@@ -1072,7 +1076,8 @@ TEST_F(SpirvWriter_ShaderIOTest, InterpolationOnVertexInputOrFragmentOutput) {
 
         auto* str_param = b.FunctionParam("input", str_ty);
         auto* ival = b.FunctionParam("ival", ty.i32());
-        ival->SetLocation(1, core::Interpolation{core::InterpolationType::kFlat});
+        ival->SetLocation(1);
+        ival->SetInterpolation(core::Interpolation{core::InterpolationType::kFlat});
         ep->SetParams({str_param, ival});
 
         b.Append(ep->Block(), [&] {  //
@@ -1094,7 +1099,8 @@ TEST_F(SpirvWriter_ShaderIOTest, InterpolationOnVertexInputOrFragmentOutput) {
     {
         auto* ep = b.Function("frag2", ty.i32());
         ep->SetStage(core::ir::Function::PipelineStage::kFragment);
-        ep->SetReturnLocation(0, core::Interpolation{core::InterpolationType::kFlat});
+        ep->SetReturnLocation(0);
+        ep->SetReturnInterpolation(core::Interpolation{core::InterpolationType::kFlat});
 
         b.Append(ep->Block(), [&] {  //
             b.Return(ep, b.Constant(42_i));
@@ -1196,7 +1202,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ClampFragDepth) {
                                  {
                                      mod.symbols.New("color"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -1208,7 +1214,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ClampFragDepth) {
                                  {
                                      mod.symbols.New("depth"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -1293,7 +1299,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ClampFragDepth_MultipleFragmentShaders) {
                                  {
                                      mod.symbols.New("color"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ 0u,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -1305,7 +1311,7 @@ TEST_F(SpirvWriter_ShaderIOTest, ClampFragDepth_MultipleFragmentShaders) {
                                  {
                                      mod.symbols.New("depth"),
                                      ty.f32(),
-                                     core::type::StructMemberAttributes{
+                                     core::IOAttributes{
                                          /* location */ std::nullopt,
                                          /* blend_src */ std::nullopt,
                                          /* color */ std::nullopt,
@@ -1498,7 +1504,7 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithoutPolyfill) {
                                                   {
                                                       mod.symbols.New("out1"),
                                                       ty.f16(),
-                                                      core::type::StructMemberAttributes{
+                                                      core::IOAttributes{
                                                           /* location */ 1u,
                                                           /* blend_src */ std::nullopt,
                                                           /* color */ std::nullopt,
@@ -1510,7 +1516,7 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithoutPolyfill) {
                                                   {
                                                       mod.symbols.New("out2"),
                                                       ty.vec4<f16>(),
-                                                      core::type::StructMemberAttributes{
+                                                      core::IOAttributes{
                                                           /* location */ 2u,
                                                           /* blend_src */ std::nullopt,
                                                           /* color */ std::nullopt,
@@ -1523,8 +1529,8 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithoutPolyfill) {
 
     auto* in1 = b.FunctionParam("in1", ty.f16());
     auto* in2 = b.FunctionParam("in2", ty.vec4<f16>());
-    in1->SetLocation(1, std::nullopt);
-    in1->SetLocation(2, std::nullopt);
+    in1->SetLocation(1);
+    in1->SetLocation(2);
     auto* func = b.Function("main", outputs, core::ir::Function::PipelineStage::kFragment);
     func->SetParams({in1, in2});
     b.Append(func->Block(), [&] {  //
@@ -1592,7 +1598,7 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithPolyfill) {
                                                   {
                                                       mod.symbols.New("out1"),
                                                       ty.f16(),
-                                                      core::type::StructMemberAttributes{
+                                                      core::IOAttributes{
                                                           /* location */ 1u,
                                                           /* blend_src */ std::nullopt,
                                                           /* color */ std::nullopt,
@@ -1604,7 +1610,7 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithPolyfill) {
                                                   {
                                                       mod.symbols.New("out2"),
                                                       ty.vec4<f16>(),
-                                                      core::type::StructMemberAttributes{
+                                                      core::IOAttributes{
                                                           /* location */ 2u,
                                                           /* blend_src */ std::nullopt,
                                                           /* color */ std::nullopt,
@@ -1617,8 +1623,8 @@ TEST_F(SpirvWriter_ShaderIOTest, F16_IO_WithPolyfill) {
 
     auto* in1 = b.FunctionParam("in1", ty.f16());
     auto* in2 = b.FunctionParam("in2", ty.vec4<f16>());
-    in1->SetLocation(1, std::nullopt);
-    in1->SetLocation(2, std::nullopt);
+    in1->SetLocation(1);
+    in1->SetLocation(2);
     auto* func = b.Function("main", outputs, core::ir::Function::PipelineStage::kFragment);
     func->SetParams({in1, in2});
     b.Append(func->Block(), [&] {  //

@@ -90,6 +90,7 @@ cc_library(
   alwayslink = True,
   srcs = [
     "access_test.cc",
+    "arraylength_test.cc",
     "binary_test.cc",
     "bitcast_test.cc",
     "builtin_test.cc",
@@ -113,6 +114,7 @@ cc_library(
     "//src/tint/lang/core/type",
     "//src/tint/lang/hlsl/writer/common",
     "//src/tint/lang/wgsl/ast",
+    "//src/tint/utils/command",
     "//src/tint/utils/containers",
     "//src/tint/utils/diagnostic",
     "//src/tint/utils/ice",
@@ -129,6 +131,7 @@ cc_library(
     "@gtest",
   ] + select({
     ":tint_build_hlsl_writer": [
+      "//src/tint/lang/hlsl/validate",
       "//src/tint/lang/hlsl/writer",
     ],
     "//conditions:default": [],

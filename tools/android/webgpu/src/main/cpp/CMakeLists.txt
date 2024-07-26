@@ -30,30 +30,37 @@ project(webgpu VERSION 1.1.0 LANGUAGES CXX)
 
 cmake_minimum_required(VERSION 3.22.1)
 
-set(DAWN_BUILD_ANDROID_SAMPLES OFF)
-set(DAWN_BUILD_SAMPLES OFF)
-set(TINT_BUILD_TESTS OFF)
-set(TINT_BUILD_CMD_TOOLS OFF)
+set(DAWN_DIR "${webgpu_SOURCE_DIR}/../../../../../..")
+add_subdirectory(${DAWN_DIR} dawn)
 
+list(INSERT CMAKE_MODULE_PATH 0 "${DAWN_DIR}/src/cmake")
+include(DawnCompilerChecks)
+
+# Make the library exposing both Dawn's API and the JNI methods.
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-add_subdirectory(../../../../../.. dawn)
+find_package(Python3 REQUIRED)
+DawnJSONGenerator(
+    TARGET "jni"
+    PRINT_NAME "Dawn JNI binding"
+    OUTPUT_SOURCES WEBGPU_JNI_SOURCES
+    OUTPUT_HEADERS WEBGPU_JNI_HEADERS
+)
 
-set(C_BINDINGS_PATH ../../../../../../out/Debug/gen/cpp)
+add_library(webgpu_c_bundled SHARED)
+target_sources(webgpu_c_bundled PRIVATE
+    ${WEBGPU_JNI_SOURCES}
+    ${WEBGPU_JNI_HEADERS}
+    JNIContext.cpp
+    JNIContext.h
+    Util.cpp
+)
 
-add_library(native_dawn ${C_BINDINGS_PATH}/methods.cpp ${C_BINDINGS_PATH}/structures.cpp Util.cpp ${CMAKE_SOURCE_DIR}/gen/include/dawn/webgpu.h)
+target_include_directories(webgpu_c_bundled PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(webgpu_c_bundled PRIVATE android webgpu_dawn dawn_common dawn_internal_config)
 
-target_link_libraries(native_dawn webgpu_dawn)
-
-list(INSERT CMAKE_MODULE_PATH 0 ../../../../../../src/cmake)
-include(BundleLibraries)
-bundle_libraries(webgpu_c_bundled native_dawn)
-
-find_library(log-lib log)
-
-target_link_libraries(webgpu_c_bundled ${log-lib} android)
-
-add_custom_command(DEPENDS webgpu_dawn POST_BUILD
+# Copy headers for webgpu_c_bundled over.
+add_custom_command(DEPENDS dawncpp_headers POST_BUILD
                    OUTPUT ${CMAKE_SOURCE_DIR}/gen/include/dawn/webgpu.h
                    COMMAND rm -r "${CMAKE_SOURCE_DIR}/gen" || echo
                    COMMAND ${CMAKE_COMMAND} -E copy

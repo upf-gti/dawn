@@ -93,7 +93,7 @@ TEST_F(HlslWriterTest, LoopBodyVarInContinue) {
     b.Append(func->Block(), [&] {
         auto* l = b.Loop();
         b.Append(l->Body(), [&] {
-            auto* v = b.Var("v", b.Zero<bool>());
+            auto* v = b.Var("v", true);
             b.Continue(l);
 
             b.Append(l->Continuing(), [&] { b.BreakIf(l, v); });
@@ -107,7 +107,7 @@ TEST_F(HlslWriterTest, LoopBodyVarInContinue) {
 void a() {
   {
     while(true) {
-      bool v = false;
+      bool v = true;
       {
         if (v) { break; }
       }
@@ -126,7 +126,7 @@ TEST_F(HlslWriterTest, LoopInitializer) {
     b.Append(func->Block(), [&] {
         auto* l = b.Loop();
         b.Append(l->Initializer(), [&] {
-            auto* v = b.Var("v", b.Zero<bool>());
+            auto* v = b.Var("v", true);
             b.NextIteration(l);
 
             b.Append(l->Body(), [&] { b.Continue(l); });
@@ -140,7 +140,7 @@ TEST_F(HlslWriterTest, LoopInitializer) {
 [numthreads(1, 1, 1)]
 void a() {
   {
-    bool v = false;
+    bool v = true;
     while(true) {
       {
         if (v) { break; }

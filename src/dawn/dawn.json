@@ -39,6 +39,12 @@
         "copyright_year": "2019"
     },
 
+    "INTERNAL__HAVE_EMDAWNWEBGPU_HEADER": {
+        "category": "structure",
+        "tags": ["emscripten"],
+        "members": []
+    },
+
     "create instance": {
         "category": "function",
         "returns": "instance",
@@ -58,6 +64,14 @@
         "args": [
             {"name": "device", "type": "device", "optional": true},
             {"name": "proc name", "type": "char", "annotation": "const*"}
+        ]
+    },
+    "get proc address 2": {
+        "category": "function",
+        "returns": "proc",
+        "args": [
+            {"name": "device", "type": "device", "optional": true},
+            {"name": "proc name", "type": "string view"}
         ]
     },
 
@@ -354,6 +368,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -387,6 +408,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -433,7 +461,8 @@
         "chain roots": ["bind group layout entry"],
         "tags": ["dawn"],
         "members": [
-            {"name": "sampler", "type": "sampler"}
+            {"name": "sampler", "type": "sampler"},
+            {"name": "sampled texture binding", "type": "uint32_t", "default": "WGPU_LIMIT_U32_UNDEFINED" }
         ]
     },
     "texture sample type": {
@@ -593,7 +622,22 @@
         ]
     },
     "bool": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "i"
+    },
+    "string view": {
+        "category": "structure",
+        "members": [
+            {"name": "data", "type": "char", "annotation": "const*", "optional": true},
+            {"name": "length", "type": "size_t", "default": "SIZE_MAX"}
+        ]
+    },
+    "nullable string view": {
+        "category": "structure",
+        "members": [
+            {"name": "data", "type": "char", "annotation": "const*", "optional": true},
+            {"name": "length", "type": "size_t", "default": "SIZE_MAX"}
+        ]
     },
     "buffer": {
         "category": "object",
@@ -653,6 +697,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             },
             {
@@ -764,6 +815,7 @@
     },
     "buffer map state": {
         "category": "enum",
+        "emscripten_string_to_int": true,
         "values": [
             {"value": 1, "name": "unmapped"},
             {"value": 2, "name": "pending"},
@@ -825,6 +877,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -911,9 +970,22 @@
                 ]
             },
             {
+                "name": "inject validation error 2",
+                "tags": ["dawn"],
+                "args": [
+                    {"name": "message", "type": "string view"}
+                ]
+            },
+            {
                 "name": "insert debug marker",
                 "args": [
                     {"name": "marker label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "insert debug marker 2",
+                "args": [
+                    {"name": "marker label", "type": "string view"}
                 ]
             },
             {
@@ -924,6 +996,12 @@
                 "name": "push debug group",
                 "args": [
                     {"name": "group label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "push debug group 2",
+                "args": [
+                    {"name": "group label", "type": "string view"}
                 ]
             },
             {
@@ -958,6 +1036,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -1049,6 +1134,7 @@
     },
     "compilation message type": {
         "category": "enum",
+        "emscripten_string_to_int": true,
         "emscripten_no_enum_table": true,
         "values": [
             {"value": 1, "name": "error"},
@@ -1075,6 +1161,12 @@
                 ]
             },
             {
+                "name": "insert debug marker 2",
+                "args": [
+                    {"name": "marker label", "type": "string view"}
+                ]
+            },
+            {
                 "name": "pop debug group",
                 "args": []
             },
@@ -1082,6 +1174,12 @@
                 "name": "push debug group",
                 "args": [
                     {"name": "group label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "push debug group 2",
+                "args": [
+                    {"name": "group label", "type": "string view"}
                 ]
             },
             {
@@ -1131,6 +1229,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -1167,6 +1272,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -1484,6 +1596,15 @@
                 ]
             },
             {
+                "name": "create error shader module 2",
+                "returns": "shader module",
+                "tags": ["dawn"],
+                "args": [
+                    {"name": "descriptor", "type": "shader module descriptor", "annotation": "const*"},
+                    {"name": "error message", "type": "string view"}
+                ]
+            },
+            {
                 "name": "create swap chain",
                 "tags": ["art", "dawn", "emscripten"],
                 "returns": "swap chain",
@@ -1567,7 +1688,7 @@
             {
                 "name": "get adapter",
                 "returns": "adapter",
-                "tags": ["dawn", "native"]
+                "tags": ["dawn"]
             },
             {
                 "name": "get queue",
@@ -1582,10 +1703,26 @@
                 "tags": ["dawn"]
             },
             {
+                "name": "inject error 2",
+                "args": [
+                    {"name": "type", "type": "error type"},
+                    {"name": "message", "type": "string view"}
+                ],
+                "tags": ["dawn"]
+            },
+            {
                 "name": "force loss",
                 "args": [
                     {"name": "type", "type": "device lost reason"},
                     {"name": "message", "type": "char", "annotation": "const*", "length": "strlen"}
+                ],
+                "tags": ["dawn"]
+            },
+            {
+                "name": "force loss 2",
+                "args": [
+                    {"name": "type", "type": "device lost reason"},
+                    {"name": "message", "type": "string view"}
                 ],
                 "tags": ["dawn"]
             },
@@ -1660,6 +1797,13 @@
                 ]
             },
             {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
+            },
+            {
                 "name": "validate texture descriptor",
                 "tags": ["dawn"],
                 "args": [
@@ -1719,16 +1863,18 @@
     },
     "device lost reason": {
         "category": "enum",
+        "emscripten_string_to_int": true,
         "emscripten_no_enum_table": true,
         "values": [
             {"value": 1, "name": "unknown"},
             {"value": 2, "name": "destroyed"},
-            {"value": 3, "name": "instance dropped"},
-            {"value": 4, "name": "failed creation"}
+            {"value": 3, "name": "instance dropped", "emscripten_string_to_int": false},
+            {"value": 4, "name": "failed creation", "emscripten_string_to_int": false}
         ]
     },
     "double": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "d"
     },
     "error callback": {
         "category": "function pointer",
@@ -1930,6 +2076,13 @@
                 ]
             },
             {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
+            },
+            {
                 "name": "destroy",
                 "returns": "void"
             },
@@ -1997,6 +2150,13 @@
                 ]
             },
             {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
+            },
+            {
                 "name": "get properties",
                 "returns": "status",
                 "args": [
@@ -2059,6 +2219,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             },
             {
@@ -2442,6 +2609,8 @@
             {"value": 9, "name": "RG11B10 ufloat renderable"},
             {"value": 10, "name": "BGRA8 unorm storage"},
             {"value": 11, "name": "float32 filterable", "jsrepr": "'float32-filterable'"},
+            {"value": 12, "name": "subgroups"},
+            {"value": 13, "name": "subgroups f16"},
 
             {"value": 0, "name": "dawn internal usages", "tags": ["dawn"]},
             {"value": 1, "name": "dawn multi planar formats", "tags": ["dawn"]},
@@ -2510,7 +2679,8 @@
         ]
     },
     "float": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "f"
     },
     "format capabilities": {
       "category": "structure",
@@ -2799,6 +2969,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -2881,6 +3058,13 @@
                 ]
             },
             {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
+            },
+            {
                 "name": "get type",
                 "returns": "query type"
             },
@@ -2917,15 +3101,6 @@
                 "args": [
                     {"name": "command count", "type": "size_t"},
                     {"name": "commands", "type": "command buffer", "annotation": "const*", "length": "command count"}
-                ]
-            },
-            {
-                "name": "on submitted work done",
-                "tags": ["emscripten"],
-                "args": [
-                    {"name": "signal value", "type": "uint64_t"},
-                    {"name": "callback", "type": "queue work done callback"},
-                    {"name": "userdata", "type": "void *"}
                 ]
             },
             {
@@ -3001,6 +3176,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -3060,6 +3242,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -3124,6 +3313,12 @@
                 ]
             },
             {
+                "name": "insert debug marker 2",
+                "args": [
+                    {"name": "marker label", "type": "string view"}
+                ]
+            },
+            {
                 "name": "pop debug group",
                 "args": []
             },
@@ -3131,6 +3326,12 @@
                 "name": "push debug group",
                 "args": [
                     {"name": "group label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "push debug group 2",
+                "args": [
+                    {"name": "group label", "type": "string view"}
                 ]
             },
             {
@@ -3163,6 +3364,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -3335,6 +3543,12 @@
                 ]
             },
             {
+                "name": "insert debug marker 2",
+                "args": [
+                    {"name": "marker label", "type": "string view"}
+                ]
+            },
+            {
                 "name": "pop debug group",
                 "args": []
             },
@@ -3342,6 +3556,12 @@
                 "name": "push debug group",
                 "args": [
                     {"name": "group label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "push debug group 2",
+                "args": [
+                    {"name": "group label", "type": "string view"}
                 ]
             },
             {
@@ -3424,6 +3644,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -3451,8 +3678,14 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
-
         ]
     },
 
@@ -3635,6 +3868,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -3688,6 +3928,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -3823,10 +4070,16 @@
             },
             {
                 "name": "set label",
-                "tags": [],
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             }
         ]
@@ -3844,13 +4097,14 @@
         "chain roots": ["surface descriptor"],
         "tags": ["art", "native"],
         "members": [
-            {"name": "window", "type": "void", "annotation": "*"}
+            {"name": "window", "type": "void *"}
         ]
     },
     "surface descriptor from canvas HTML selector": {
         "category": "structure",
         "chained": "in",
         "chain roots": ["surface descriptor"],
+        "tags": ["emscripten"],
         "members": [
             {"name": "selector", "type": "char", "annotation": "const*", "length": "strlen"}
         ]
@@ -3878,7 +4132,7 @@
         "category": "structure",
         "chained": "in",
         "chain roots": ["surface descriptor"],
-        "tags": ["upstream"],
+        "tags": ["native"],
         "members": [
             {"name": "connection", "type": "void", "annotation": "*"},
             {"name": "window", "type": "uint32_t"}
@@ -3956,19 +4210,21 @@
         "category": "enum",
         "emscripten_no_enum_table": true,
         "values": [
-            {"value": 1, "name": "surface descriptor from metal layer", "tags": ["native"]},
-            {"value": 2, "name": "surface descriptor from windows HWND", "tags": ["native"]},
-            {"value": 3, "name": "surface descriptor from xlib window", "tags": ["native"]},
-            {"value": 4, "name": "surface descriptor from canvas HTML selector"},
-            {"value": 5, "name": "shader module SPIRV descriptor"},
-            {"value": 6, "name": "shader module WGSL descriptor"},
-            {"value": 7, "name": "primitive depth clip control"},
-            {"value": 8, "name": "surface descriptor from wayland surface", "tags": ["native"]},
-            {"value": 9, "name": "surface descriptor from android native window", "tags": ["native"]},
-            {"value": 10, "name": "surface descriptor from xcb window", "tags": ["upstream"]},
-            {"value": 11, "name": "render pass descriptor max draw count"},
+            {"value": 1, "name": "shader module SPIRV descriptor"},
+            {"value": 2, "name": "shader module WGSL descriptor"},
+            {"value": 3, "name": "primitive depth clip control"},
+            {"value": 4, "name": "render pass descriptor max draw count"},
 
             {"value": 0, "name": "texture binding view dimension descriptor", "tags": ["compat"]},
+
+            {"value": 0, "name": "surface descriptor from canvas HTML selector", "tags": ["emscripten"]},
+
+            {"value": 0, "name": "surface descriptor from metal layer", "tags": ["native"]},
+            {"value": 1, "name": "surface descriptor from windows HWND", "tags": ["native"]},
+            {"value": 2, "name": "surface descriptor from xlib window", "tags": ["native"]},
+            {"value": 3, "name": "surface descriptor from wayland surface", "tags": ["native"]},
+            {"value": 4, "name": "surface descriptor from android native window", "tags": ["native"]},
+            {"value": 5, "name": "surface descriptor from xcb window", "tags": ["native"]},
 
             {"value": 0, "name": "surface descriptor from windows core window", "tags": ["dawn"]},
             {"value": 1, "name": "external texture binding entry", "tags": ["dawn"]},
@@ -4057,6 +4313,13 @@
                 "returns": "void",
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
+                ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
                 ]
             },
             {
@@ -4323,6 +4586,13 @@
                 "args": [
                     {"name": "label", "type": "char", "annotation": "const*", "length": "strlen"}
                 ]
+            },
+            {
+                "name": "set label 2",
+                "returns": "void",
+                "args": [
+                    {"name": "label", "type": "nullable string view"}
+                ]
             }
         ]
     },
@@ -4467,32 +4737,40 @@
       "category": "native"
     },
     "void": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "v"
     },
     "void *": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "p"
     },
     "void const *": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "p"
     },
     "int": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "i"
     },
     "int32_t": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "i"
     },
     "size_t": {
         "category": "native",
+        "wasm type": "p",
         "wire transparent": false
     },
     "uint16_t": {
         "category": "native"
     },
     "uint32_t": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "i"
     },
     "uint64_t": {
-        "category": "native"
+        "category": "native",
+        "wasm type": "j"
     },
     "uint8_t": {
         "category": "native"

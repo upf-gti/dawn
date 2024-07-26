@@ -508,7 +508,7 @@ void ASTPrinter::EmitAttributes(StringStream& out, VectorRef<const ast::Attribut
             },
             [&](const ast::BuiltinAttribute* builtin) {
                 out << "builtin(";
-                EmitExpression(out, builtin->builtin);
+                out << core::ToString(builtin->builtin);
                 out << ")";
             },
             [&](const ast::DiagnosticAttribute* diagnostic) {
@@ -516,10 +516,11 @@ void ASTPrinter::EmitAttributes(StringStream& out, VectorRef<const ast::Attribut
             },
             [&](const ast::InterpolateAttribute* interpolate) {
                 out << "interpolate(";
-                EmitExpression(out, interpolate->type);
-                if (interpolate->sampling) {
+                out << core::ToString(interpolate->interpolation.type);
+                if (interpolate->interpolation.sampling !=
+                    core::InterpolationSampling::kUndefined) {
                     out << ", ";
-                    EmitExpression(out, interpolate->sampling);
+                    out << core::ToString(interpolate->interpolation.sampling);
                 }
                 out << ")";
             },

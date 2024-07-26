@@ -47,6 +47,36 @@ if (DAWN_FETCH_DEPENDENCIES)
     )
 endif ()
 
+################################################################################
+# Start of Emscripten enabled third party directories
+#   To minimize the number of third party targets to make when building with
+#   Emscripten to the minimal set, only subdirectories added within the Start
+#   and End of the Emscripten block are enabled .
+################################################################################
+
+if (NOT TARGET absl::strings)
+    # Recommended setting for compability with future abseil releases.
+    set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
+    message(STATUS "Dawn: using Abseil at ${DAWN_ABSEIL_DIR}")
+    if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR
+        ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang"))
+        add_compile_options(
+            -Wno-array-parameter
+            -Wno-deprecated-builtins
+            -Wno-unknown-warning-option
+        )
+    endif()
+
+    add_subdirectory(${DAWN_ABSEIL_DIR} "${CMAKE_CURRENT_BINARY_DIR}/abseil")
+endif()
+
+################################################################################
+# End of Emscripten enabled third party directories
+################################################################################
+if (${DAWN_ENABLE_EMSCRIPTEN})
+    return()
+endif()
+
 if (NOT TARGET SPIRV-Headers)
     set(SPIRV_HEADERS_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
     set(SPIRV_HEADERS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
@@ -74,7 +104,12 @@ if(NOT TARGET glslang AND (TINT_BUILD_GLSL_WRITER OR TINT_BUILD_GLSL_VALIDATOR) 
     set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "" FORCE)
     set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
     message(STATUS "Dawn: using GLSLang at ${DAWN_GLSLANG_DIR}")
+    # https://github.com/KhronosGroup/glslang/issues/2283
+    # glslang does not export symbols properly when BUILD_SHARED_LIBS=1, so always build it as static for now.
+    set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS 0)
     add_subdirectory("${DAWN_GLSLANG_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/glslang" EXCLUDE_FROM_ALL)
+    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
 endif()
 
 if (NOT TARGET glfw AND DAWN_USE_GLFW)
@@ -83,25 +118,10 @@ if (NOT TARGET glfw AND DAWN_USE_GLFW)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_X11 ${DAWN_USE_X11} CACHE BOOL "" FORCE)
     set(GLFW_BUILD_WAYLAND ${DAWN_USE_WAYLAND} CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
     message(STATUS "Dawn: using GLFW at ${DAWN_GLFW_DIR}")
     add_subdirectory(${DAWN_GLFW_DIR} "${CMAKE_CURRENT_BINARY_DIR}/glfw")
-endif()
-
-if (NOT TARGET absl::strings)
-    # Recommended setting for compability with future abseil releases.
-    set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
-    message(STATUS "Dawn: using Abseil at ${DAWN_ABSEIL_DIR}")
-    if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR
-        ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang"))
-        add_compile_options(
-            -Wno-array-parameter
-            -Wno-deprecated-builtins
-            -Wno-unknown-warning-option
-        )
-    endif()
-
-    add_subdirectory(${DAWN_ABSEIL_DIR} "${CMAKE_CURRENT_BINARY_DIR}/abseil")
 endif()
 
 if (DAWN_BUILD_PROTOBUF AND NOT TARGET libprotobuf-mutator)
@@ -121,6 +141,11 @@ if (NOT TARGET Vulkan-Headers AND DAWN_ENABLE_VULKAN)
 
     set(VULKAN_HEADERS_ENABLE_MODULE OFF)
     add_subdirectory(${DAWN_VULKAN_HEADERS_DIR} "${CMAKE_CURRENT_BINARY_DIR}/vulkan-headers")
+endif()
+
+if (NOT TARGET VulkanUtilityHeaders AND DAWN_ENABLE_VULKAN)
+    message(STATUS "Dawn: using VulkanUtilityLibraries at ${DAWN_VULKAN_UTILITY_LIBRARIES_DIR}")
+    add_subdirectory(${DAWN_VULKAN_UTILITY_LIBRARIES_DIR} "${CMAKE_CURRENT_BINARY_DIR}/vulkan-utility-libraries")
 endif()
 
 if (DAWN_ENABLE_SWIFTSHADER AND NOT TARGET vk_swiftshader)
@@ -150,6 +175,11 @@ function(AddSubdirectoryDXC)
     set(HLSL_ENABLE_FIXED_VER OFF)
     set(HLSL_BUILD_DXILCONV OFF)
     set(HLSL_INCLUDE_TESTS OFF)
+    # When bundling up dawn, the object files of dxc must be binary compatible with rest of dawn.
+    # The default value of `OFF` adds a macro `_ITERATOR_DEBUG_LEVEL=0`.
+    # This is a problem in `Debug` builds of dawn because all of dawn's objects get compiled
+    # with `_ITERATOR_DEBUG_LEVEL=2`
+    set(HLSL_ENABLE_DEBUG_ITERATORS ON)
 
     set(ENABLE_SPIRV_CODEGEN OFF)
     set(SPIRV_BUILD_TESTS OFF)

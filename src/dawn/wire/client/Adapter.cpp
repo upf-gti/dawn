@@ -85,12 +85,16 @@ class RequestDeviceEvent : public TrackedEvent {
 
         // Callback needs to happen before device lost handling to ensure resolution order.
         if (mCallback) {
+            Ref<Device> device = mDevice;
             mCallback(mStatus,
-                      mStatus == WGPURequestDeviceStatus_Success ? ReturnToAPI(mDevice) : nullptr,
+                      mStatus == WGPURequestDeviceStatus_Success ? ReturnToAPI(std::move(device))
+                                                                 : nullptr,
                       mMessage ? mMessage->c_str() : nullptr, mUserdata1.ExtractAsDangling());
         } else if (mCallback2) {
+            Ref<Device> device = mDevice;
             mCallback2(mStatus,
-                       mStatus == WGPURequestDeviceStatus_Success ? ReturnToAPI(mDevice) : nullptr,
+                       mStatus == WGPURequestDeviceStatus_Success ? ReturnToAPI(std::move(device))
+                                                                  : nullptr,
                        mMessage ? mMessage->c_str() : nullptr, mUserdata1.ExtractAsDangling(),
                        mUserdata2.ExtractAsDangling());
         }
@@ -192,39 +196,17 @@ void Adapter::SetInfo(const WGPUAdapterInfo* info) {
     }
 }
 
-void Adapter::SetProperties(const WGPUAdapterProperties* properties) {
-    mProperties = *properties;
+void Adapter::SetProperties(const WGPUAdapterInfo* info) {
     mProperties.nextInChain = nullptr;
-
-    // Loop through the chained struct.
-    WGPUChainedStructOut* chain = properties->nextInChain;
-    while (chain != nullptr) {
-        switch (chain->sType) {
-            case WGPUSType_AdapterPropertiesMemoryHeaps: {
-                // Make a copy of the heap info in `mMemoryHeapInfo`.
-                const auto* memoryHeapProperties =
-                    reinterpret_cast<const WGPUAdapterPropertiesMemoryHeaps*>(chain);
-                mMemoryHeapInfo = {
-                    memoryHeapProperties->heapInfo,
-                    memoryHeapProperties->heapInfo + memoryHeapProperties->heapCount};
-                break;
-            }
-            case WGPUSType_AdapterPropertiesD3D: {
-                auto* d3dProperties = reinterpret_cast<WGPUAdapterPropertiesD3D*>(chain);
-                mD3DProperties.shaderModel = d3dProperties->shaderModel;
-                break;
-            }
-            case WGPUSType_AdapterPropertiesVk: {
-                auto* vkProperties = reinterpret_cast<WGPUAdapterPropertiesVk*>(chain);
-                mVkProperties.driverVersion = vkProperties->driverVersion;
-                break;
-            }
-            default:
-                DAWN_UNREACHABLE();
-                break;
-        }
-        chain = chain->next;
-    }
+    mProperties.vendorID = info->vendorID;
+    mProperties.vendorName = info->vendor;
+    mProperties.architecture = info->architecture;
+    mProperties.deviceID = info->deviceID;
+    mProperties.name = info->device;
+    mProperties.driverDescription = info->description;
+    mProperties.adapterType = info->adapterType;
+    mProperties.backendType = info->backendType;
+    mProperties.compatibilityMode = info->compatibilityMode;
 }
 
 WGPUStatus Adapter::GetInfo(WGPUAdapterInfo* info) const {
@@ -366,7 +348,7 @@ void Adapter::RequestDevice(const WGPUDeviceDescriptor* descriptor,
 WGPUFuture Adapter::RequestDeviceF(const WGPUDeviceDescriptor* descriptor,
                                    const WGPURequestDeviceCallbackInfo& callbackInfo) {
     Client* client = GetClient();
-    Ref<Device> device = client->Make<Device>(GetEventManagerHandle(), descriptor);
+    Ref<Device> device = client->Make<Device>(GetEventManagerHandle(), this, descriptor);
     auto [futureIDInternal, tracked] =
         GetEventManager().TrackEvent(std::make_unique<RequestDeviceEvent>(callbackInfo, device));
     if (!tracked) {
@@ -402,7 +384,7 @@ WGPUFuture Adapter::RequestDeviceF(const WGPUDeviceDescriptor* descriptor,
 WGPUFuture Adapter::RequestDevice2(const WGPUDeviceDescriptor* descriptor,
                                    const WGPURequestDeviceCallbackInfo2& callbackInfo) {
     Client* client = GetClient();
-    Ref<Device> device = client->Make<Device>(GetEventManagerHandle(), descriptor);
+    Ref<Device> device = client->Make<Device>(GetEventManagerHandle(), this, descriptor);
     auto [futureIDInternal, tracked] =
         GetEventManager().TrackEvent(std::make_unique<RequestDeviceEvent>(callbackInfo, device));
     if (!tracked) {

@@ -75,7 +75,7 @@
             { "name": "event manager handle", "type": "ObjectHandle" },
             { "name": "future", "type": "future" }
         ],
-        "destroy object": [
+        "unregister object": [
             { "name": "object type", "type": "ObjectType" },
             { "name": "object id", "type": "ObjectId" }
         ],
@@ -104,6 +104,11 @@
             { "name": "shader module id", "type": "ObjectId", "id_type": "shader module" },
             { "name": "event manager handle", "type": "ObjectHandle" },
             { "name": "future", "type": "future" }
+        ],
+        "surface get current texture": [
+            { "name": "surface id", "type": "ObjectId", "id_type": "surface" },
+            { "name": "configured device id", "type": "ObjectId", "id_type": "device" },
+            { "name": "texture handle", "type": "ObjectHandle", "handle_type": "texture" }
         ],
         "instance request adapter": [
             { "name": "instance id", "type": "ObjectId", "id_type": "instance" },
@@ -185,7 +190,6 @@
             { "name": "status", "type": "request adapter status" },
             { "name": "message", "type": "char", "annotation": "const*", "length": "strlen", "optional": true },
             { "name": "info", "type": "adapter info", "annotation": "const*", "optional": "true" },
-            { "name": "properties", "type": "adapter properties", "annotation": "const*", "optional": "true" },
             { "name": "limits", "type": "supported limits", "annotation": "const*", "optional": "true" },
             { "name": "features count", "type": "uint32_t"},
             { "name": "features", "type": "feature name", "annotation": "const*", "length": "features count"}
@@ -247,6 +251,7 @@
             "DeviceSetLoggingCallback",
             "InstanceEnumerateWGSLLanguageFeatures",
             "InstanceHasWGSLLanguageFeature",
+            "InstanceCreateSurface",
             "InstanceRequestAdapter",
             "InstanceRequestAdapterF",
             "InstanceRequestAdapter2",
@@ -261,6 +266,7 @@
             "QueueWriteBuffer",
             "QueueWriteTexture",
             "SurfaceGetCapabilities",
+            "SurfaceGetCurrentTexture",
             "SurfaceGetPreferredFormat",
             "TextureGetWidth",
             "TextureGetHeight",
@@ -275,6 +281,8 @@
             "AdapterGetInstance",
             "BufferDestroy",
             "BufferUnmap",
+            "DeviceCreateErrorBuffer",
+            "DeviceDestroy",
             "DeviceGetAdapter",
             "DeviceGetQueue",
             "DeviceGetSupportedSurfaceUsage",
@@ -282,7 +290,7 @@
             "InstanceProcessEvents",
             "InstanceWaitAny",
             "SurfaceConfigure",
-            "SurfaceGetCurrentTexture",
+            "SurfaceUnconfigure",
             "SwapChainGetCurrentTexture"
         ],
         "client_special_objects": [

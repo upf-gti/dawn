@@ -117,6 +117,13 @@ class State {
             return Program{resolver::Resolve(b)};
         }
 
+        // Clone all symbols before we start.
+        // This ensures that we preserve the names of named values and prevents unnamed values
+        // receiving names that would conflict with named values that are emitted later than them.
+        mod.symbols.Foreach([&](Symbol s) {  //
+            b.Symbols().New(s.Name());
+        });
+
         RootBlock(mod.root_block);
 
         // TODO(crbug.com/tint/1902): Emit user-declared types
@@ -253,10 +260,14 @@ class State {
                 }
             }
             if (auto loc = param->Location()) {
-                attrs.Push(b.Location(u32(loc->value)));
-                if (auto interp = loc->interpolation) {
-                    attrs.Push(b.Interpolate(interp->type, interp->sampling));
-                }
+                attrs.Push(b.Location(u32(loc.value())));
+            }
+            if (auto color = param->Color()) {
+                Enable(wgsl::Extension::kChromiumExperimentalFramebufferFetch);
+                attrs.Push(b.Color(u32(color.value())));
+            }
+            if (auto interp = param->Interpolation()) {
+                attrs.Push(b.Interpolate(interp->type, interp->sampling));
             }
             if (param->Invariant()) {
                 attrs.Push(b.Invariant());
@@ -306,10 +317,10 @@ class State {
             }
         }
         if (auto loc = fn->ReturnLocation()) {
-            ret_attrs.Push(b.Location(u32(loc->value)));
-            if (auto interp = loc->interpolation) {
-                ret_attrs.Push(b.Interpolate(interp->type, interp->sampling));
-            }
+            ret_attrs.Push(b.Location(u32(loc.value())));
+        }
+        if (auto interp = fn->ReturnInterpolation()) {
+            ret_attrs.Push(b.Interpolate(interp->type, interp->sampling));
         }
         if (fn->ReturnInvariant()) {
             ret_attrs.Push(b.Invariant());
@@ -421,7 +432,7 @@ class State {
         {
             TINT_SCOPED_ASSIGNMENT(statements_, &body_stmts);
             for (auto* inst : *l->Body()) {
-                if (body_stmts.IsEmpty()) {
+                if (body_stmts.IsEmpty() && !cond) {
                     if (auto* if_ = inst->As<core::ir::If>()) {
                         if (if_->Results().IsEmpty() &&                          //
                             if_->True()->Length() == 1 &&                        //
@@ -942,6 +953,11 @@ class State {
             },
             [&](const core::type::Array* a) {
                 auto el = Type(a->ElemType());
+                if (!el) {
+                    // The element type is untypeable, so we need to infer it instead.
+                    return ast::Type{b.Expr(b.Ident("array"))};
+                }
+
                 Vector<const ast::Attribute*, 1> attrs;
                 if (!a->IsStrideImplicit()) {
                     attrs.Push(b.Stride(a->Stride()));
@@ -1000,6 +1016,12 @@ class State {
     }
 
     ast::Type Struct(const core::type::Struct* s) {
+        // Skip builtin structures.
+        // TODO(350778507): Consider using a struct flag for builtin structures instead.
+        if (tint::HasPrefix(s->Name().NameView(), "__")) {
+            return ast::Type{};
+        }
+
         auto n = structs_.GetOrAdd(s, [&] {
             auto members = tint::Transform<8>(s->Members(), [&](const core::type::StructMember* m) {
                 auto ty = Type(m->Type());
@@ -1017,6 +1039,10 @@ class State {
                 if (auto blend_src = ir_attrs.blend_src) {
                     Enable(wgsl::Extension::kDualSourceBlending);
                     ast_attrs.Push(b.BlendSrc(u32(*blend_src)));
+                }
+                if (auto color = ir_attrs.color) {
+                    Enable(wgsl::Extension::kChromiumExperimentalFramebufferFetch);
+                    ast_attrs.Push(b.Color(u32(*color)));
                 }
                 if (auto builtin = ir_attrs.builtin) {
                     if (RequiresSubgroups(*builtin)) {
