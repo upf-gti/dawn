@@ -241,9 +241,7 @@ void RenderEncoderBase::APIDrawIndirect(BufferBase* indirectBuffer, uint64_t ind
             // TODO(crbug.com/dawn/1166): Adding the indirectBuffer is needed for correct usage
             // validation, but it will unnecessarily transition to indirectBuffer usage in the
             // backend.
-            if(IsValidationEnabled()) {
-                mUsageTracker.BufferUsedAs(indirectBuffer, wgpu::BufferUsage::Indirect);
-            }
+            mUsageTracker.BufferUsedAs(indirectBuffer, wgpu::BufferUsage::Indirect);
 
             mDrawCount++;
 
@@ -304,9 +302,7 @@ void RenderEncoderBase::APIDrawIndexedIndirect(BufferBase* indirectBuffer,
             // TODO(crbug.com/dawn/1166): Adding the indirectBuffer is needed for correct usage
             // validation, but it will unecessarily transition to indirectBuffer usage in the
             // backend.
-            if(IsValidationEnabled()) {
-                mUsageTracker.BufferUsedAs(indirectBuffer, wgpu::BufferUsage::Indirect);
-            }
+            mUsageTracker.BufferUsedAs(indirectBuffer, wgpu::BufferUsage::Indirect);
 
             mDrawCount++;
 
@@ -401,9 +397,7 @@ void RenderEncoderBase::APISetIndexBuffer(BufferBase* buffer,
             cmd->offset = offset;
             cmd->size = size;
 
-            if(IsValidationEnabled()) {
-                mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Index);
-            }
+            mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Index);
 
             return {};
         },
@@ -470,9 +464,7 @@ void RenderEncoderBase::APISetVertexBuffer(uint32_t slot,
                 cmd->offset = offset;
                 cmd->size = size;
 
-                if(IsValidationEnabled()) {
-                    mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Vertex);
-                }
+                mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Vertex);
             }
             return {};
         },
@@ -500,9 +492,7 @@ void RenderEncoderBase::APISetBindGroup(uint32_t groupIndexIn,
                                    dynamicOffsets);
                 mCommandBufferState.SetBindGroup(groupIndex, group, dynamicOffsetCount,
                                                  dynamicOffsets);
-                if(IsValidationEnabled()) {
-                    mUsageTracker.AddBindGroup(group);
-                }
+                mUsageTracker.AddBindGroup(group);
             }
 
             return {};
