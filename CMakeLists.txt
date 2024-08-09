@@ -214,6 +214,39 @@ option(TINT_ENABLE_BREAK_IN_DEBUGGER "Enable tint::debugger::Break()" OFF)
 option(TINT_CHECK_CHROMIUM_STYLE "Check for [chromium-style] issues during build" OFF)
 option(TINT_RANDOMIZE_HASHES "Randomize the hash seed value to detect non-deterministic output" OFF)
 
+set(DAWN_ENABLE_METAL OFF)
+set(DAWN_ENABLE_D3D12 OFF)
+set(DAWN_ENABLE_VULKAN ON)
+
+set(DAWN_ENABLE_D3D11 OFF)
+set(DAWN_ENABLE_NULL OFF)
+set(DAWN_ENABLE_DESKTOP_GL OFF)
+set(DAWN_ENABLE_OPENGLES OFF)
+
+set(DAWN_USE_GLFW OFF)
+
+# Used for reflection
+set(TINT_BUILD_TINT ON)
+
+# Disable unneeded parts
+set(DAWN_BUILD_SAMPLES OFF)
+set(TINT_BUILD_SAMPLES OFF)
+set(TINT_BUILD_DOCS OFF)
+set(TINT_BUILD_TESTS OFF)
+set(TINT_BUILD_FUZZERS OFF)
+set(TINT_BUILD_SPIRV_TOOLS_FUZZER OFF)
+set(TINT_BUILD_AST_FUZZER OFF)
+set(TINT_BUILD_REGEX_FUZZER OFF)
+set(TINT_BUILD_BENCHMARKS OFF)
+set(TINT_BUILD_TESTS OFF)
+set(TINT_BUILD_AS_OTHER_OS OFF)
+set(TINT_BUILD_REMOTE_COMPILE OFF)
+set(TINT_BUILD_CMD_TOOLS OFF)
+
+set(TINT_ENABLE_INSTALL ON)
+
+set(DAWN_FETCH_DEPENDENCIES ON)
+
 set_if_not_defined(DAWN_THIRD_PARTY_DIR "${Dawn_SOURCE_DIR}/third_party" "Directory in which to find third-party dependencies.")
 
 set_if_not_defined(DAWN_ABSEIL_DIR "${DAWN_THIRD_PARTY_DIR}/abseil-cpp" "Directory in which to find Abseil")
@@ -496,3 +529,7 @@ if (DAWN_BUILD_MONOLITHIC_LIBRARY AND DAWN_ENABLE_INSTALL)
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Dawn"
   )
 endif ()
+
+if (WIN32)
+  add_subdirectory(dawn_static)
+endif()
