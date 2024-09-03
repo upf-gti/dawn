@@ -92,8 +92,8 @@ struct State {
 
         auto maybe_put_in_let = [&](auto* inst) {
             if (auto* result = inst->Result(0)) {
-                auto& usages = result->Usages();
-                switch (usages.Count()) {
+                auto& usages = result->UsagesUnsorted();
+                switch (result->NumUsages()) {
                     case 0:  // No usage
                         break;
                     case 1: {  // Single usage
@@ -176,6 +176,8 @@ struct State {
 Result<SuccessType> ValueToLet(Module& ir) {
     auto result = ValidateAndDumpIfNeeded(ir, "ValueToLet transform",
                                           core::ir::Capabilities{
+                                              core::ir::Capability::kAllow8BitIntegers,
+                                              core::ir::Capability::kAllowPointersInStructures,
                                               core::ir::Capability::kAllowVectorElementPointer,
                                           });
     if (result != Success) {

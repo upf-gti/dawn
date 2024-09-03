@@ -504,11 +504,7 @@ MaybeError DeviceBase::Initialize(Ref<QueueBase> defaultQueue) {
         mMutex = nullptr;
     }
 
-    // mAdapter is not set for mock test devices.
-    // TODO(crbug.com/dawn/1702): using a mock adapter could avoid the null checking.
-    if (mAdapter != nullptr) {
-        mAdapter->GetInstance()->AddDevice(this);
-    }
+    mAdapter->GetInstance()->AddDevice(this);
 
     return {};
 }
@@ -554,15 +550,11 @@ void DeviceBase::WillDropLastExternalRef() {
     // freed any device-scope memory needed to run the callback.
     mUncapturedErrorCallbackInfo = kEmptyUncapturedErrorCallbackInfo;
 
-    // mAdapter is not set for mock test devices.
-    // TODO(crbug.com/dawn/1702): using a mock adapter could avoid the null checking.
-    if (mAdapter != nullptr) {
-        mAdapter->GetInstance()->RemoveDevice(this);
+    mAdapter->GetInstance()->RemoveDevice(this);
 
-        // Once last external ref dropped, all callbacks should be forwarded to Instance's callback
-        // queue instead.
-        mCallbackTaskManager = mAdapter->GetInstance()->GetCallbackTaskManager();
-    }
+    // Once last external ref dropped, all callbacks should be forwarded to Instance's callback
+    // queue instead.
+    mCallbackTaskManager = mAdapter->GetInstance()->GetCallbackTaskManager();
 }
 
 void DeviceBase::DestroyObjects() {
@@ -1875,14 +1867,13 @@ void DeviceBase::SetWGSLExtensionAllowList() {
         mWGSLAllowedFeatures.extensions.insert(
             tint::wgsl::Extension::kChromiumExperimentalFramebufferFetch);
     }
+    if (mEnabledFeatures.IsEnabled(Feature::ClipDistances)) {
+        mWGSLAllowedFeatures.extensions.insert(tint::wgsl::Extension::kClipDistances);
+    }
 
     // Language features are enabled instance-wide.
-    // mAdapter is not set for mock test devices.
-    // TODO(crbug.com/dawn/1702): using a mock adapter and instance could avoid the null checking.
-    if (mAdapter != nullptr) {
-        const auto& allowedFeatures = GetInstance()->GetAllowedWGSLLanguageFeatures();
-        mWGSLAllowedFeatures.features = {allowedFeatures.begin(), allowedFeatures.end()};
-    }
+    const auto& allowedFeatures = GetInstance()->GetAllowedWGSLLanguageFeatures();
+    mWGSLAllowedFeatures.features = {allowedFeatures.begin(), allowedFeatures.end()};
 }
 
 const tint::wgsl::AllowedFeatures& DeviceBase::GetWGSLAllowedFeatures() const {
@@ -1995,8 +1986,10 @@ wgpu::Status DeviceBase::APIGetLimits(SupportedLimits* limits) const {
     limits->limits = mLimits.v1;
 
     if (auto* subgroupLimits = unpacked.Get<DawnExperimentalSubgroupLimits>()) {
-        if (!mToggles.IsEnabled(Toggle::AllowUnsafeAPIs)) {
-            // If AllowUnsafeAPIs is not enabled, return the default-initialized
+        // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
+        if (!(HasFeature(Feature::Subgroups) ||
+              HasFeature(Feature::ChromiumExperimentalSubgroups))) {
+            // If subgroups feature is not enabled, return the default-initialized
             // DawnExperimentalSubgroupLimits object, where minSubgroupSize and
             // maxSubgroupSize are WGPU_LIMIT_U32_UNDEFINED.
             *subgroupLimits = DawnExperimentalSubgroupLimits{};
@@ -2450,10 +2443,6 @@ const TogglesState& DeviceBase::GetTogglesState() const {
     return mToggles;
 }
 
-void DeviceBase::ForceSetToggleForTesting(Toggle toggle, bool isEnabled) {
-    mToggles.ForceSet(toggle, isEnabled);
-}
-
 void DeviceBase::ForceEnableFeatureForTesting(Feature feature) {
     mEnabledFeatures.EnableFeature(feature);
     mFormatTable = BuildFormatTable(this);
@@ -2602,6 +2591,7 @@ bool DeviceBase::IsLockedByCurrentThreadIfNeeded() const {
 }
 
 void DeviceBase::DumpMemoryStatistics(dawn::native::MemoryDump* dump) const {
+    DAWN_ASSERT(IsLockedByCurrentThreadIfNeeded());
     std::string prefix = absl::StrFormat("device_%p", static_cast<const void*>(this));
     GetObjectTrackingList(ObjectType::Texture)->ForEach([&](const ApiObjectBase* texture) {
         static_cast<const TextureBase*>(texture)->DumpMemoryStatistics(dump, prefix.c_str());
@@ -2609,6 +2599,28 @@ void DeviceBase::DumpMemoryStatistics(dawn::native::MemoryDump* dump) const {
     GetObjectTrackingList(ObjectType::Buffer)->ForEach([&](const ApiObjectBase* buffer) {
         static_cast<const BufferBase*>(buffer)->DumpMemoryStatistics(dump, prefix.c_str());
     });
+}
+
+uint64_t DeviceBase::ComputeEstimatedMemoryUsage() const {
+    DAWN_ASSERT(IsLockedByCurrentThreadIfNeeded());
+    uint64_t size = 0;
+    GetObjectTrackingList(ObjectType::Texture)->ForEach([&](const ApiObjectBase* texture) {
+        size += static_cast<const TextureBase*>(texture)->ComputeEstimatedByteSize();
+    });
+    GetObjectTrackingList(ObjectType::Buffer)->ForEach([&](const ApiObjectBase* buffer) {
+        size += static_cast<const BufferBase*>(buffer)->GetAllocatedSize();
+    });
+    return size;
+}
+
+void DeviceBase::ReduceMemoryUsage() {
+    DAWN_ASSERT(IsLockedByCurrentThreadIfNeeded());
+    if (ConsumedError(GetQueue()->CheckPassedSerials())) {
+        return;
+    }
+    GetDynamicUploader()->Deallocate(GetQueue()->GetCompletedCommandSerial(), /*freeAll=*/true);
+    mInternalPipelineStore->ResetScratchBuffers();
+    mTemporaryUniformBuffer = nullptr;
 }
 
 ResultOrError<Ref<BufferBase>> DeviceBase::GetOrCreateTemporaryUniformBuffer(size_t size) {

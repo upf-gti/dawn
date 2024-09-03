@@ -46,17 +46,12 @@
 
 #ifndef __EMSCRIPTEN__
 #include "GLFW/glfw3.h"
-#include "dawn/dawn_proc.h"
+#include "dawn/dawn_proc.h"  // nogncheck
 #include "dawn/native/DawnNative.h"
 #include "webgpu/webgpu_glfw.h"
 #else
 #include <emscripten/emscripten.h>
 #endif  // __EMSCRIPTEN__
-
-wgpu::TextureFormat GetPreferredSwapChainTextureFormat() {
-    // TODO(dawn:1362): Return the adapter's preferred format when implemented.
-    return wgpu::TextureFormat::BGRA8Unorm;
-}
 
 // Parsed options.
 static wgpu::BackendType backendType = wgpu::BackendType::Undefined;
@@ -151,8 +146,6 @@ int SampleBase::Run(unsigned int delay) {
             break;
     }
 
-        // TODO(crbug.com/42241221): Once the headers are more stable and implemented in Emscripten,
-        // we could probably unify branched code below a bit more.
 #ifndef __EMSCRIPTEN__
     dawnProcSetProcs(&dawn::native::GetProcs());
 
@@ -176,6 +169,10 @@ int SampleBase::Run(unsigned int delay) {
     instanceDescriptor.nextInChain = &toggles;
     instanceDescriptor.features.timedWaitAnyEnable = true;
     sample->instance = wgpu::CreateInstance(&instanceDescriptor);
+#else
+    // Create the instance
+    sample->instance = wgpu::CreateInstance(nullptr);
+#endif  // __EMSCRIPTEN__
 
     // Synchronously create the adapter
     sample->instance.WaitAny(
@@ -259,6 +256,7 @@ int SampleBase::Run(unsigned int delay) {
         return 1;
     }
 
+#ifndef __EMSCRIPTEN__
     if (!sample->Setup()) {
         dawn::ErrorLog() << "Failed to perform sample setup";
         return 1;
@@ -273,43 +271,11 @@ int SampleBase::Run(unsigned int delay) {
         }
     }
 #else
-    // Create the instance
-    sample->instance = wgpu::CreateInstance(nullptr);
-
-    // Create the adapter, device, and set the emscripten loop via callbacks
-    // TODO(crbug.com/42241221) Update to use the newer APIs once they are implemented in
-    // Emscripten.
-    sample->instance.RequestAdapter(
-        &adapterOptions,
-        [](WGPURequestAdapterStatus status, WGPUAdapter adapter, const char* message,
-           void* userdata) {
-            if (status != WGPURequestAdapterStatus_Success) {
-                dawn::ErrorLog() << "Failed to get an adapter:" << message;
-                return;
-            }
-            sample->adapter = wgpu::Adapter::Acquire(adapter);
-
-            wgpu::DeviceDescriptor deviceDesc = {};
-            sample->adapter.RequestDevice(
-                &deviceDesc,
-                [](WGPURequestDeviceStatus status, WGPUDevice device, const char* message,
-                   void* userdata) {
-                    if (status != WGPURequestDeviceStatus_Success) {
-                        dawn::ErrorLog() << "Failed to get an device:" << message;
-                        return;
-                    }
-                    sample->device = wgpu::Device::Acquire(device);
-                    sample->queue = sample->device.GetQueue();
-
-                    if (sample->Setup()) {
-                        emscripten_set_main_loop([]() { sample->FrameImpl(); }, 0, false);
-                    } else {
-                        dawn::ErrorLog() << "Failed to setup sample";
-                    }
-                },
-                nullptr);
-        },
-        nullptr);
+    if (sample->Setup()) {
+        emscripten_set_main_loop([]() { sample->FrameImpl(); }, 0, false);
+    } else {
+        dawn::ErrorLog() << "Failed to setup sample";
+    }
 #endif  // __EMSCRIPTEN__
 
     return 0;
@@ -353,6 +319,7 @@ bool SampleBase::Setup() {
     config.width = width;
     config.height = height;
     surface.Configure(&config);
+    this->preferredSurfaceTextureFormat = capabilities.formats[0];
 
     return SetupImpl();
 }

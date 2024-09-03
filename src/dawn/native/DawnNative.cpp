@@ -314,7 +314,18 @@ WGPUBackendType GetWGPUBackendType(WGPUAdapter adapter) {
 }
 
 void DumpMemoryStatistics(WGPUDevice device, MemoryDump* dump) {
+    auto deviceLock(FromAPI(device)->GetScopedLock());
     FromAPI(device)->DumpMemoryStatistics(dump);
+}
+
+uint64_t ComputeEstimatedMemoryUsage(WGPUDevice device) {
+    auto deviceLock(FromAPI(device)->GetScopedLock());
+    return FromAPI(device)->ComputeEstimatedMemoryUsage();
+}
+
+void ReduceMemoryUsage(WGPUDevice device) {
+    auto deviceLock(FromAPI(device)->GetScopedLock());
+    FromAPI(device)->ReduceMemoryUsage();
 }
 
 }  // namespace dawn::native

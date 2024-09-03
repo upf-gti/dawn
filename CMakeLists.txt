@@ -152,7 +152,7 @@ option(DAWN_USE_X11 "Enable support for X11 surface" ${USE_X11})
 option(DAWN_USE_GLFW "Enable compilation of the GLFW windowing utils" ${DAWN_SUPPORTS_GLFW_FOR_WINDOWING})
 option(DAWN_USE_WINDOWS_UI "Enable support for Windows UI surface" ${USE_WINDOWS_UI})
 option(DAWN_USE_BUILT_DXC "Enable building and using DXC by the D3D12 backend" OFF)
-option(DAWN_DXC_DISABLE_ASSERTS_DEBUG "Disable asserts in DXC in debug builds" OFF)
+option(DAWN_DXC_ENABLE_ASSERTS_IN_NDEBUG "Enable DXC asserts in non-debug builds" ON)
 option(DAWN_TARGET_MACOS "Manually link Apple core frameworks" ${TARGET_MACOS})
 
 option(DAWN_BUILD_SAMPLES "Enables building Dawn's samples" ${BUILD_SAMPLES})
@@ -207,8 +207,6 @@ option(TINT_BUILD_TESTS "Build tests" ON)
 option(TINT_BUILD_AS_OTHER_OS "Override OS detection to force building of *_other.cc files" OFF)
 
 option(TINT_BUILD_TINTD "Build the WGSL language server" OFF)
-
-set_if_not_defined(TINT_EXTERNAL_BENCHMARK_CORPUS_DIR "" "Directory that holds a corpus of external shaders to benchmark.")
 
 option(TINT_ENABLE_BREAK_IN_DEBUGGER "Enable tint::debugger::Break()" OFF)
 option(TINT_CHECK_CHROMIUM_STYLE "Check for [chromium-style] issues during build" OFF)
@@ -271,6 +269,7 @@ target_include_directories(dawn_public_config INTERFACE
 # The internal config contains additional path but includes the dawn_public_config include paths
 add_library(dawn_internal_config INTERFACE)
 target_include_directories(dawn_internal_config INTERFACE
+    "${PROJECT_SOURCE_DIR}"
     "${DAWN_SRC_DIR}"
     "${DAWN_BUILD_GEN_DIR}/src"
 )
@@ -292,6 +291,7 @@ message(STATUS "Dawn build Metal backend: ${DAWN_ENABLE_METAL}")
 message(STATUS "Dawn build Vulkan backend: ${DAWN_ENABLE_VULKAN}")
 message(STATUS "Dawn build OpenGL backend: ${DAWN_ENABLE_DESKTOP_GL}")
 message(STATUS "Dawn build OpenGL ES backend: ${DAWN_ENABLE_OPENGLES}")
+message(STATUS "Dawn build Emscripten: ${DAWN_ENABLE_EMSCRIPTEN}")
 message(STATUS "Dawn build Null backend: ${DAWN_ENABLE_NULL}")
 
 message(STATUS "Dawn enable SPIR-V validation: ${DAWN_ENABLE_SPIRV_VALIDATION}")
@@ -302,7 +302,7 @@ message(STATUS "Dawn build X11 support: ${DAWN_USE_X11}")
 message(STATUS "Dawn build GLFW support: ${DAWN_USE_GLFW}")
 message(STATUS "Dawn build Windows UI support: ${DAWN_USE_WINDOWS_UI}")
 message(STATUS "Dawn build and use DXC: ${DAWN_USE_BUILT_DXC}")
-message(STATUS "Dawn disable DXC asserts in debug builds: ${DAWN_DXC_DISABLE_ASSERTS_DEBUG}")
+message(STATUS "Dawn enable DXC asserts in non-debug builds: ${DAWN_DXC_ENABLE_ASSERTS_IN_NDEBUG}")
 
 message(STATUS "Dawn build samples: ${DAWN_BUILD_SAMPLES}")
 message(STATUS "Dawn build Node bindings: ${DAWN_BUILD_NODE_BINDINGS}")
@@ -334,7 +334,6 @@ message(STATUS "Tint build IR fuzzer: ${TINT_BUILD_IR_FUZZER}")
 message(STATUS "Tint build benchmarks: ${TINT_BUILD_BENCHMARKS}")
 message(STATUS "Tint build tests: ${TINT_BUILD_TESTS}")
 message(STATUS "Tint build checking [chromium-style]: ${TINT_CHECK_CHROMIUM_STYLE}")
-message(STATUS "Tint external benchmark corpus dir: ${TINT_EXTERNAL_BENCHMARK_CORPUS_DIR}")
 endif()
 
 set(IS_ASAN ${DAWN_ENABLE_ASAN})
@@ -422,6 +421,9 @@ add_subdirectory(third_party)
 # BUILD_SHARED_LIBS=1, so always build it as static for now.
 set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS 0)
+
+add_subdirectory(src/utils)
+
 # Only build Tint when we are not building under Emscripten.
 if (NOT ${DAWN_ENABLE_EMSCRIPTEN})
   add_subdirectory(src/tint)

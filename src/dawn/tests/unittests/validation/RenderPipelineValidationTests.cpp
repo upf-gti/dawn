@@ -292,7 +292,7 @@ TEST_F(RenderPipelineValidationTest, DepthStencilAspectRequirement) {
         wgpu::DepthStencilState* depthStencil =
             descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth24PlusStencil8);
         depthStencil->depthCompare = wgpu::CompareFunction::LessEqual;
-        depthStencil->depthWriteEnabled = true;
+        depthStencil->depthWriteEnabled = wgpu::OptionalBool::True;
         device.CreateRenderPipeline(&descriptor);
     }
 
@@ -305,7 +305,7 @@ TEST_F(RenderPipelineValidationTest, DepthStencilAspectRequirement) {
         wgpu::DepthStencilState* depthStencil =
             descriptor.EnableDepthStencil(wgpu::TextureFormat::Stencil8);
         depthStencil->depthCompare = wgpu::CompareFunction::LessEqual;
-        depthStencil->depthWriteEnabled = false;
+        depthStencil->depthWriteEnabled = wgpu::OptionalBool::False;
         ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
     }
 
@@ -318,7 +318,7 @@ TEST_F(RenderPipelineValidationTest, DepthStencilAspectRequirement) {
         wgpu::DepthStencilState* depthStencil =
             descriptor.EnableDepthStencil(wgpu::TextureFormat::Stencil8);
         depthStencil->depthCompare = wgpu::CompareFunction::Undefined;
-        depthStencil->depthWriteEnabled = true;
+        depthStencil->depthWriteEnabled = wgpu::OptionalBool::True;
         ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
     }
 }
@@ -1338,49 +1338,20 @@ TEST_F(RenderPipelineValidationTest, StripIndexFormatAllowed) {
     }
 }
 
-// Test that specifying a unclippedDepth value is an error if the feature is not enabled.
+// Test that setting unclippedDepth to true is an error if the feature is not enabled.
 TEST_F(RenderPipelineValidationTest, UnclippedDepthWithoutFeature) {
     {
         utils::ComboRenderPipelineDescriptor descriptor;
         descriptor.vertex.module = vsModule;
         descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = true;
-        descriptor.primitive.nextInChain = &depthClipControl;
-        ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor),
-                            testing::HasSubstr("not supported"));
+        descriptor.primitive.unclippedDepth = false;
+        device.CreateRenderPipeline(&descriptor);
     }
     {
         utils::ComboRenderPipelineDescriptor descriptor;
         descriptor.vertex.module = vsModule;
         descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = false;
-        descriptor.primitive.nextInChain = &depthClipControl;
-        ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor),
-                            testing::HasSubstr("not supported"));
-    }
-}
-
-// Test that specifying an unclippedDepth value is an error if the feature is not enabled.
-TEST_F(RenderPipelineValidationTest, DepthClipControlWithoutFeature) {
-    {
-        utils::ComboRenderPipelineDescriptor descriptor;
-        descriptor.vertex.module = vsModule;
-        descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = true;
-        descriptor.primitive.nextInChain = &depthClipControl;
-        ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor),
-                            testing::HasSubstr("not supported"));
-    }
-    {
-        utils::ComboRenderPipelineDescriptor descriptor;
-        descriptor.vertex.module = vsModule;
-        descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = false;
-        descriptor.primitive.nextInChain = &depthClipControl;
+        descriptor.primitive.unclippedDepth = true;
         ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor),
                             testing::HasSubstr("not supported"));
     }
@@ -1392,7 +1363,7 @@ TEST_F(RenderPipelineValidationTest, DepthCompareRequiredForFormatsWithDepth) {
     descriptor.vertex.module = vsModule;
     descriptor.cFragment.module = fsModule;
 
-    descriptor.cDepthStencil.depthWriteEnabled = true;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::True;
     descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth32Float);
 
     // Control case: Always is valid for format with depth.
@@ -1404,30 +1375,30 @@ TEST_F(RenderPipelineValidationTest, DepthCompareRequiredForFormatsWithDepth) {
     ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 
     // Undefined is valid though if depthCompare is not used by anything.
-    descriptor.cDepthStencil.depthWriteEnabled = false;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::False;
     descriptor.cDepthStencil.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
     descriptor.cDepthStencil.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
     device.CreateRenderPipeline(&descriptor);
 
     // Undefined is invalid if depthCompare is used by depthWriteEnabled.
-    descriptor.cDepthStencil.depthWriteEnabled = true;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::True;
     descriptor.cDepthStencil.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
     descriptor.cDepthStencil.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
     ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 
     // Undefined is invalid if depthCompare is used by stencilFront.depthFailOp.
-    descriptor.cDepthStencil.depthWriteEnabled = false;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::False;
     descriptor.cDepthStencil.stencilFront.depthFailOp = wgpu::StencilOperation::Zero;
     descriptor.cDepthStencil.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
     ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 
     // Undefined is invalid if depthCompare is used by stencilBack.depthFailOp.
-    descriptor.cDepthStencil.depthWriteEnabled = false;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::False;
     descriptor.cDepthStencil.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
     descriptor.cDepthStencil.stencilBack.depthFailOp = wgpu::StencilOperation::Zero;
     ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 
-    descriptor.cDepthStencil.depthWriteEnabled = false;
+    descriptor.cDepthStencil.depthWriteEnabled = wgpu::OptionalBool::False;
     descriptor.cDepthStencil.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
     descriptor.cDepthStencil.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
     descriptor.EnableDepthStencil(wgpu::TextureFormat::Stencil8);
@@ -1452,32 +1423,35 @@ TEST_F(RenderPipelineValidationTest, DepthWriteEnabledRequiredForFormatsWithDept
         descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth32Float);
 
     // Control case: Set depthWriteEnabled to false for format with depth.
-    depthStencil->depthWriteEnabled = false;
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::False;
     device.CreateRenderPipeline(&descriptor);
 
-    // When DepthStencilStateDepthWriteDefinedDawn struct is chained, depthWriteEnabled is now
-    // considered optional and depthWriteDefined needs to be true for formats with depth only.
-    wgpu::DepthStencilStateDepthWriteDefinedDawn depthWriteDefined;
     depthStencil = descriptor.EnableDepthStencil(wgpu::TextureFormat::Stencil8);
-    depthStencil->nextInChain = &depthWriteDefined;
 
-    // depthWriteDefined set to true is valid for format with no depth.
-    depthWriteDefined.depthWriteDefined = true;
+    // depthWriteEnabled set to undefined is valid for format with no depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::Undefined;
     device.CreateRenderPipeline(&descriptor);
 
-    // depthWriteDefined set to false is valid for format with no depth.
-    depthWriteDefined.depthWriteDefined = false;
+    // depthWriteEnabled set to false is valid for format with no depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::False;
     device.CreateRenderPipeline(&descriptor);
+
+    // Error case: depthWriteEnabled set to true is invalid for format with no depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::True;
+    ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 
     depthStencil = descriptor.EnableDepthStencil(wgpu::TextureFormat::Depth32Float);
-    depthStencil->nextInChain = &depthWriteDefined;
 
-    // depthWriteDefined set to true is valid for format with depth.
-    depthWriteDefined.depthWriteDefined = true;
+    // depthWriteEnabled set to false is valid for format with depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::False;
     device.CreateRenderPipeline(&descriptor);
 
-    // Error case: depthWriteDefined set to false is invalid for format with depth.
-    depthWriteDefined.depthWriteDefined = false;
+    // depthWriteEnabled set to true is valid for format with depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::True;
+    device.CreateRenderPipeline(&descriptor);
+
+    // Error case: depthWriteEnabled set to undefined is invalid for format with depth.
+    depthStencil->depthWriteEnabled = wgpu::OptionalBool::Undefined;
     ASSERT_DEVICE_ERROR(device.CreateRenderPipeline(&descriptor));
 }
 
@@ -2020,18 +1994,14 @@ TEST_F(DepthClipControlValidationTest, Success) {
         utils::ComboRenderPipelineDescriptor descriptor;
         descriptor.vertex.module = vsModule;
         descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = true;
-        descriptor.primitive.nextInChain = &depthClipControl;
+        descriptor.primitive.unclippedDepth = true;
         device.CreateRenderPipeline(&descriptor);
     }
     {
         utils::ComboRenderPipelineDescriptor descriptor;
         descriptor.vertex.module = vsModule;
         descriptor.cFragment.module = fsModule;
-        wgpu::PrimitiveDepthClipControl depthClipControl;
-        depthClipControl.unclippedDepth = false;
-        descriptor.primitive.nextInChain = &depthClipControl;
+        descriptor.primitive.unclippedDepth = false;
         device.CreateRenderPipeline(&descriptor);
     }
 }
@@ -3047,9 +3017,9 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1RequiresBlendSrc1InWGSL) {
     }
 }
 
-// Test that when any blend factor uses the alpha channel of `src1` the fragment shader output with
-// `@blend_src(1)` must have an alpha channel.
-TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1AlphaInWGSL) {
+// Test that when any color blend factor uses the alpha channel of `src1` the fragment shader output
+// with `@blend_src(1)` must have an alpha channel.
+TEST_F(DualSourceBlendingFeatureTest, ColorBlendFactorSrc1AlphaRequiresBlendSrc1AlphaInWGSL) {
     constexpr std::array kBlendFactors = {wgpu::BlendFactor::Src1, wgpu::BlendFactor::OneMinusSrc1,
                                           wgpu::BlendFactor::Src1Alpha,
                                           wgpu::BlendFactor::OneMinusSrc1Alpha};
@@ -3068,7 +3038,11 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1Alpha
         })");
 
     auto CheckBlendFactorSrc1Alpha = [&](const wgpu::RenderPipelineDescriptor* descriptor,
-                                         wgpu::BlendFactor blendFactor) {
+                                         wgpu::BlendFactor blendFactor, bool isColorBlendFactor) {
+        if (!isColorBlendFactor) {
+            device.CreateRenderPipeline(descriptor);
+            return;
+        }
         switch (blendFactor) {
             case wgpu::BlendFactor::Src1:
             case wgpu::BlendFactor::OneMinusSrc1:
@@ -3094,7 +3068,8 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1Alpha
         descriptor.cBlends[0].color.dstFactor = wgpu::BlendFactor::Src;
         descriptor.cBlends[0].color.operation = wgpu::BlendOperation::Add;
 
-        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor);
+        constexpr bool kIsColorBlendFactor = true;
+        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor, kIsColorBlendFactor);
     }
 
     // Test color dstFactor
@@ -3108,7 +3083,8 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1Alpha
         descriptor.cBlends[0].color.dstFactor = blendFactor;
         descriptor.cBlends[0].color.operation = wgpu::BlendOperation::Add;
 
-        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor);
+        constexpr bool kIsColorBlendFactor = true;
+        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor, kIsColorBlendFactor);
     }
 
     // Test alpha srcFactor
@@ -3122,7 +3098,8 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1Alpha
         descriptor.cBlends[0].alpha.dstFactor = wgpu::BlendFactor::SrcAlpha;
         descriptor.cBlends[0].alpha.operation = wgpu::BlendOperation::Add;
 
-        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor);
+        constexpr bool kIsColorBlendFactor = false;
+        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor, kIsColorBlendFactor);
     }
 
     // Test alpha dstFactor
@@ -3136,7 +3113,8 @@ TEST_F(DualSourceBlendingFeatureTest, BlendFactorSrc1AlphaRequiresBlendSrc1Alpha
         descriptor.cBlends[0].alpha.dstFactor = blendFactor;
         descriptor.cBlends[0].alpha.operation = wgpu::BlendOperation::Add;
 
-        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor);
+        constexpr bool kIsColorBlendFactor = false;
+        CheckBlendFactorSrc1Alpha(&descriptor, blendFactor, kIsColorBlendFactor);
     }
 }
 

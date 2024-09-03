@@ -143,6 +143,7 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::SurfaceCapabilities);
     EnableFeature(Feature::D3D11MultithreadProtected);
     EnableFeature(Feature::DualSourceBlending);
+    EnableFeature(Feature::ClipDistances);
     EnableFeature(Feature::Unorm16TextureFormats);
     EnableFeature(Feature::Snorm16TextureFormats);
     EnableFeature(Feature::Norm16TextureFormats);
@@ -151,6 +152,7 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::R8UnormStorage);
     EnableFeature(Feature::ShaderModuleCompilationOptions);
     EnableFeature(Feature::DawnLoadResolveTexture);
+    EnableFeature(Feature::DawnPartialLoadResolveTexture);
     if (mDeviceInfo.isUMA && mDeviceInfo.supportsMapNoOverwriteDynamicBuffers) {
         // With UMA we should allow mapping usages on more type of buffers.
         EnableFeature(Feature::BufferMapExtendedUsages);
@@ -240,7 +242,7 @@ MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits)
     // Max number of "constants" where each constant is a 16-byte float4
     limits->v1.maxUniformBufferBindingSize = D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16;
 
-    if (gpu_info::IsQualcomm(GetVendorId())) {
+    if (gpu_info::IsQualcomm_ACPI(GetVendorId())) {
         // limit of number of texels in a buffer == (1 << 27)
         // D3D11_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP
         // This limit doesn't apply to a raw buffer, but only applies to
