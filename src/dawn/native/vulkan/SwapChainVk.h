@@ -92,6 +92,8 @@ class SwapChain : public SwapChainBase {
 
     Ref<Texture> mBlitTexture;
     Ref<Texture> mTexture;
+
+    VkFence mNextImageFence;
 };
 
 ResultOrError<VkSurfaceKHR> CreateVulkanSurface(InstanceBase* instance,
