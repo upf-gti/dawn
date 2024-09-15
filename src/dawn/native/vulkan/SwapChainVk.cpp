@@ -212,17 +212,6 @@ MaybeError SwapChain::Initialize(SwapChainBase* previousSwapChain) {
                            "CreateSemaphore"));
     }
 
-    {
-        VkFenceCreateInfo createFenceInfo;
-        createFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        createFenceInfo.pNext = nullptr;
-        createFenceInfo.flags = 0;
-
-        DAWN_TRY(CheckVkSuccess(device->fn.CreateFence(device->GetVkDevice(), &createFenceInfo,
-                                                       nullptr, &*mNextImageFence),
-                                "CreateFence"));
-    }
-
     return {};
 }
 
@@ -497,14 +486,9 @@ ResultOrError<SwapChainTextureInfo> SwapChain::GetCurrentTextureInternal(bool is
 
     VkResult result = VkResult::WrapUnsafe(device->fn.AcquireNextImageKHR(
         device->GetVkDevice(), mSwapChain, std::numeric_limits<uint64_t>::max(), semaphore,
-        mNextImageFence, &mLastImageIndex));
+        VkFence{}, &mLastImageIndex));
 
     if (result == VK_SUCCESS) {
-
-        device->fn.WaitForFences(device->GetVkDevice(), 1, &*mNextImageFence, true, 1000000000L);
-
-        device->fn.ResetFences(device->GetVkDevice(), 1, &*mNextImageFence);
-
         // TODO(crbug.com/dawn/269) put the semaphore on the texture so it is waited on when
         // used instead of directly on the recording context?
         ToBackend(device->GetQueue())
