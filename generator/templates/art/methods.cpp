@@ -143,7 +143,7 @@ jobject toByteBuffer(JNIEnv *env, const void* address, jlong size) {
     {% else %}
         {% if _kotlin_return.annotation == '*' %}
             //* Make a native container to accept the data output via parameter.
-            {{ as_cType(_kotlin_return.type.name) }} out;
+            {{ as_cType(_kotlin_return.type.name) }} out = {};
             args.{{ _kotlin_return.name.get() }} = &out;
         {% endif %}
         {{ 'auto result =' if _kotlin_return.type.name.get() != 'void' }}
@@ -159,6 +159,13 @@ jobject toByteBuffer(JNIEnv *env, const void* address, jlong size) {
         if (env->ExceptionCheck()) {  //* Early out if client (Kotlin) callback threw an exception.
             return {{ '0' if method.return_type.name.get() != 'void' }};
         }
+        {% if method.return_type.name.canonical_case() == 'status' %}
+            if (result != WGPUStatus_Success) {
+                //* TODO(b/344805524): custom exception for Dawn.
+                env->ThrowNew(env->FindClass("java/lang/Error"), "Method failed");
+                return {{ '0' if method.return_type.name.get() != 'void' }};
+            }
+        {% endif %}
     {% endif %}
     {% if _kotlin_return.type.name.get() != 'void' %}
         {% if _kotlin_return.type.name.get() in ['void const *', 'void *'] %}

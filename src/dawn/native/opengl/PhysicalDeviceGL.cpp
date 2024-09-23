@@ -55,7 +55,7 @@ const Vendor kVendors[] = {{"ATI", gpu_info::kVendorID_AMD},
                            {"Imagination", gpu_info::kVendorID_ImgTec},
                            {"Intel", gpu_info::kVendorID_Intel},
                            {"NVIDIA", gpu_info::kVendorID_Nvidia},
-                           {"Qualcomm", gpu_info::kVendorID_Qualcomm}};
+                           {"Qualcomm", gpu_info::kVendorID_Qualcomm_PCI}};
 
 uint32_t GetVendorIdFromVendors(const char* vendor) {
     uint32_t vendorId = 0;
@@ -87,6 +87,12 @@ uint32_t GetDeviceIdFromRender(std::string_view render) {
     }
 
     return deviceId;
+}
+
+bool IsANGLEDesktopGL(std::string renderer) {
+    return renderer.find("ANGLE") != std::string::npos &&
+           renderer.find("OpenGL") != std::string::npos &&
+           renderer.find("OpenGL ES") == std::string::npos;
 }
 
 }  // anonymous namespace
@@ -226,6 +232,16 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
             supportsBPTC) {
             EnableFeature(dawn::native::Feature::TextureCompressionBC);
         }
+    }
+
+    if (mFunctions.IsGLExtensionSupported("GL_KHR_texture_compression_astc_ldr")) {
+        EnableFeature(Feature::TextureCompressionASTC);
+    }
+
+    // ETC2 is core in ES 3.0.
+    // However, ANGLE on Desktop GL does not support it.
+    if (mFunctions.IsAtLeastGLES(3, 0) && !IsANGLEDesktopGL(mName)) {
+        EnableFeature(Feature::TextureCompressionETC2);
     }
 
     if (mDisplay->egl.HasExt(EGLExt::DisplayTextureShareGroup)) {

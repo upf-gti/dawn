@@ -43,7 +43,6 @@
 #include "src/tint/api/tint.h"
 #include "src/tint/cmd/common/helper.h"
 #include "src/tint/lang/core/ir/disassembler.h"
-#include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/wgsl/ast/module.h"
 #include "src/tint/lang/wgsl/ast/transform/first_index_offset.h"
 #include "src/tint/lang/wgsl/ast/transform/manager.h"
@@ -57,28 +56,23 @@
 #include "src/tint/utils/containers/transform.h"
 #include "src/tint/utils/diagnostic/formatter.h"
 #include "src/tint/utils/macros/defer.h"
-#include "src/tint/utils/system/env.h"
-#include "src/tint/utils/system/terminal.h"
 #include "src/tint/utils/text/string.h"
 #include "src/tint/utils/text/string_stream.h"
 #include "src/tint/utils/text/styled_text.h"
 #include "src/tint/utils/text/styled_text_printer.h"
-#include "src/tint/utils/text/styled_text_theme.h"
 
 #if TINT_BUILD_WGSL_READER
 #include "src/tint/lang/wgsl/reader/program_to_ir/program_to_ir.h"
 #include "src/tint/lang/wgsl/reader/reader.h"
 
 #if TINT_BUILD_IR_BINARY
-#include "src/tint/lang/core/ir/binary/encode.h"
-#include "src/tint/lang/core/ir/validator.h"
 #include "src/tint/lang/wgsl/helpers/apply_substitute_overrides.h"
 #endif  // TINT_BUILD_IR_BINARY
 
 #endif  // TINT_BUILD_WGSL_READER
 
 #if TINT_BUILD_SPV_WRITER
-#include "src/tint/lang/spirv/writer/helpers/ast_generate_bindings.h"
+#include "src/tint/lang/spirv/writer/helpers/generate_bindings.h"
 #include "src/tint/lang/spirv/writer/writer.h"
 #endif  // TINT_BUILD_SPV_WRITER
 
@@ -695,29 +689,24 @@ std::string Disassemble(const std::vector<uint32_t>& data) {
 /// @returns true on success
 bool GenerateSpirv(const tint::Program& program, const Options& options) {
 #if TINT_BUILD_SPV_WRITER
-    // TODO(jrprice): Provide a way for the user to set non-default options.
+    // Convert the AST program to an IR module.
+    auto ir = tint::wgsl::reader::ProgramToLoweredIR(program);
+    if (ir != tint::Success) {
+        std::cerr << "Failed to generate IR: " << ir << "\n";
+        return false;
+    }
+
     tint::spirv::writer::Options gen_options;
     gen_options.disable_robustness = !options.enable_robustness;
     gen_options.disable_workgroup_init = options.disable_workgroup_init;
     gen_options.use_storage_input_output_16 = options.use_storage_input_output_16;
-    gen_options.bindings = tint::spirv::writer::GenerateBindings(program);
+    gen_options.bindings = tint::spirv::writer::GenerateBindings(ir.Get());
 
-    tint::Result<tint::spirv::writer::Output> result;
-    if (options.use_ir) {
-        // Convert the AST program to an IR module.
-        auto ir = tint::wgsl::reader::ProgramToLoweredIR(program);
-        if (ir != tint::Success) {
-            std::cerr << "Failed to generate IR: " << ir << "\n";
-            return false;
-        }
-        result = tint::spirv::writer::Generate(ir.Get(), gen_options);
-    } else {
-        result = tint::spirv::writer::Generate(program, gen_options);
-    }
-
+    // Generate SPIR-V from Tint IR.
+    auto result = tint::spirv::writer::Generate(ir.Get(), gen_options);
     if (result != tint::Success) {
         tint::cmd::PrintWGSL(std::cerr, program);
-        std::cerr << "Failed to generate: " << result.Failure() << "\n";
+        std::cerr << "Failed to generate SPIR-V: " << result.Failure() << "\n";
         return false;
     }
 
@@ -872,12 +861,12 @@ bool GenerateMsl([[maybe_unused]] const tint::Program& program,
     }
 
     // Default to validating against MSL 1.2.
-    // If subgroups are used, bump the version to 2.1.
+    // If subgroups are used, bump the version to 2.2.
     auto msl_version = tint::msl::validate::MslVersion::kMsl_1_2;
     for (auto* enable : program.AST().Enables()) {
         if (enable->HasExtension(tint::wgsl::Extension::kChromiumExperimentalSubgroups) ||
             enable->HasExtension(tint::wgsl::Extension::kSubgroups)) {
-            msl_version = std::max(msl_version, tint::msl::validate::MslVersion::kMsl_2_1);
+            msl_version = std::max(msl_version, tint::msl::validate::MslVersion::kMsl_2_2);
         }
         if (enable->HasExtension(tint::wgsl::Extension::kChromiumExperimentalPixelLocal) ||
             enable->HasExtension(tint::wgsl::Extension::kChromiumExperimentalFramebufferFetch)) {
@@ -1100,7 +1089,18 @@ bool GenerateGlsl([[maybe_unused]] const tint::Program& program,
             offset += 8;
         }
 
-        auto result = tint::glsl::writer::Generate(prg, gen_options, entry_point_name);
+        tint::Result<tint::glsl::writer::Output> result;
+        if (options.use_ir) {
+            // Convert the AST program to an IR module.
+            auto ir = tint::wgsl::reader::ProgramToLoweredIR(prg);
+            if (ir != tint::Success) {
+                std::cerr << "Failed to generate IR: " << ir << "\n";
+                return false;
+            }
+            result = tint::glsl::writer::Generate(ir.Get(), gen_options, entry_point_name);
+        } else {
+            result = tint::glsl::writer::Generate(prg, gen_options, entry_point_name);
+        }
         if (result != tint::Success) {
             tint::cmd::PrintWGSL(std::cerr, prg);
             std::cerr << "Failed to generate: " << result.Failure() << "\n";

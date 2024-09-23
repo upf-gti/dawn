@@ -253,6 +253,10 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
         EnableFeature(Feature::R8UnormStorage);
     }
 
+    if (mDeviceInfo.features.shaderClipDistance == VK_TRUE) {
+        EnableFeature(Feature::ClipDistances);
+    }
+
     bool shaderF16Enabled = false;
     if (mDeviceInfo.HasExt(DeviceExt::ShaderFloat16Int8) &&
         mDeviceInfo.HasExt(DeviceExt::_16BitStorage) &&
@@ -264,6 +268,11 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
             EnableFeature(Feature::ShaderF16);
             shaderF16Enabled = true;
         }
+    }
+
+    if (mDeviceInfo.HasExt(DeviceExt::DrawIndirectCount) &&
+        mDeviceInfo.features.multiDrawIndirect == VK_TRUE) {
+        EnableFeature(Feature::MultiDrawIndirect);
     }
 
     // unclippedDepth=true translates to depthClamp=true, which implicitly disables clipping.
@@ -677,16 +686,6 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     // Vulkan SPEC and drivers.
     deviceToggles->Default(Toggle::UseTemporaryBufferInCompressedTextureToTextureCopy, true);
 
-    // TODO(crbug.com/345276504): Remove this and associated ShaderModuleVK code after M128 branch.
-#if DAWN_PLATFORM_IS(CHROMEOS)
-    // ChromeOS is controlled by the feature flag (which defaults to `true`) for one more release.
-    deviceToggles->Default(Toggle::UseTintIR,
-                           platform->IsFeatureEnabled(platform::Features::kWebGPUUseTintIR));
-#else
-    // All other Vulkan platforms are not controlled by the feature flag and use the IR by default.
-    deviceToggles->Default(Toggle::UseTintIR, true);
-#endif
-
     if (IsAndroidQualcomm()) {
         // dawn:1564, dawn:1897: Recording a compute pass after a render pass in the same command
         // buffer frequently causes a crash on Qualcomm GPUs. To work around that bug, split the
@@ -840,7 +839,7 @@ FeatureValidationResult PhysicalDevice::ValidateFeatureSupportedWithTogglesImpl(
 // Android devices with Qualcomm GPUs have a myriad of known issues. (dawn:1549)
 bool PhysicalDevice::IsAndroidQualcomm() const {
 #if DAWN_PLATFORM_IS(ANDROID)
-    return gpu_info::IsQualcomm(GetVendorId());
+    return gpu_info::IsQualcomm_PCI(GetVendorId());
 #else
     return false;
 #endif

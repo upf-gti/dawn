@@ -28,6 +28,7 @@
 #ifndef SRC_TINT_LANG_WGSL_RESOLVER_VALIDATOR_H_
 #define SRC_TINT_LANG_WGSL_RESOLVER_VALIDATOR_H_
 
+#include <cstdint>
 #include <set>
 #include <string>
 #include <utility>
@@ -107,6 +108,14 @@ struct TypeAndAddressSpace {
 
 /// DiagnosticFilterStack is a scoped stack of diagnostic filters.
 using DiagnosticFilterStack = ScopeStack<wgsl::DiagnosticRule, wgsl::DiagnosticSeverity>;
+
+/// Enumerator of duplication behavior for diagnostics.
+enum class DiagnosticDuplicates : uint8_t {
+    // Diagnostic duplicates are allowed.
+    kAllowed,
+    // Diagnostic duplicates are not allowed.
+    kDenied,
+};
 
 /// Validation logic for various ast nodes. The validations in general should
 /// be shallow and depend on the resolver to call on children. The validations
@@ -245,11 +254,13 @@ class Validator {
     /// @param storage_type the attribute storage type
     /// @param stage the current pipeline stage
     /// @param is_input true if this is an input attribute
+    /// @param ignore_clip_distances_type_validation true if ignore type check on clip_distances
     /// @returns true on success, false otherwise.
     bool BuiltinAttribute(const ast::BuiltinAttribute* attr,
                           const core::type::Type* storage_type,
                           ast::PipelineStage stage,
-                          const bool is_input) const;
+                          const bool is_input,
+                          const bool ignore_clip_distances_type_validation = false) const;
 
     /// Validates a continue statement
     /// @param stmt the continue statement to validate
@@ -535,6 +546,11 @@ class Validator {
     /// @returns true on success, false otherwise
     bool SubgroupBroadcast(const sem::Call* call) const;
 
+    /// Validates a quadBroadcast builtin function
+    /// @param call the builtin call to validate
+    /// @returns true on success, false otherwise
+    bool QuadBroadcast(const sem::Call* call) const;
+
     /// Validates an optional builtin function and its required extensions and language features.
     /// @param call the builtin call to validate
     /// @returns true on success, false otherwise
@@ -553,9 +569,11 @@ class Validator {
     /// Validates a set of diagnostic controls.
     /// @param controls the diagnostic controls to validate
     /// @param use the place where the controls are being used ("directive" or "attribute")
+    /// @param allow_duplicates if same name same severity diagnostics are allowed
     /// @returns true on success, false otherwise.
     bool DiagnosticControls(VectorRef<const ast::DiagnosticControl*> controls,
-                            const char* use) const;
+                            const char* use,
+                            DiagnosticDuplicates allow_duplicates) const;
 
     /// Validates a address space layout
     /// @param type the type to validate

@@ -64,6 +64,8 @@ struct InternalPipelineStore {
 
     Ref<ShaderModuleBase> placeholderFragmentShader;
 
+    void ResetScratchBuffers();
+
     // A scratch buffer suitable for use as a copy destination and storage binding.
     ScratchBuffer scratchStorage;
 
@@ -71,8 +73,13 @@ struct InternalPipelineStore {
     // buffer for indirect dispatch or draw calls.
     ScratchBuffer scratchIndirectStorage;
 
-    Ref<ComputePipelineBase> renderValidationPipeline;
-    Ref<ShaderModuleBase> renderValidationShader;
+    // A render pass can have both DrawIndirect and MultiDrawIndirect calls.
+    // We need a separate buffer to store the validated multiDrawCommands.
+    ScratchBuffer scratchMultiDrawStorage;
+
+    Ref<ShaderModuleBase> indirectDrawValidationShader;
+    Ref<ComputePipelineBase> indirectDrawValidationPipeline;
+    Ref<ComputePipelineBase> multiDrawValidationPipeline;
     Ref<ComputePipelineBase> dispatchIndirectValidationPipeline;
 
     Ref<RenderPipelineBase> blitRG8ToDepth16UnormPipeline;
@@ -104,6 +111,8 @@ struct InternalPipelineStore {
     absl::flat_hash_map<wgpu::TextureFormat, Ref<RenderPipelineBase>> depthBlitPipelines;
 
     BlitColorToColorWithDrawPipelinesCache expandResolveTexturePipelines;
+
+    ResolveMultisampleWithDrawPipelinesCache resolveMultisamplePipelines;
 };
 
 }  // namespace dawn::native

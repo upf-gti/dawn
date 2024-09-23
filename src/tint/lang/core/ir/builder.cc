@@ -70,8 +70,8 @@ Function* Builder::Function(std::string_view name,
 }
 
 ir::Loop* Builder::Loop() {
-    return Append(
-        ir.allocators.instructions.Create<ir::Loop>(Block(), MultiInBlock(), MultiInBlock()));
+    return Append(ir.allocators.instructions.Create<ir::Loop>(ir.NextInstructionId(), Block(),
+                                                              MultiInBlock(), MultiInBlock()));
 }
 
 Block* Builder::Case(ir::Switch* s, VectorRef<ir::Constant*> values) {
@@ -96,11 +96,12 @@ Block* Builder::Case(ir::Switch* s, std::initializer_list<ir::Constant*> selecto
 }
 
 ir::Discard* Builder::Discard() {
-    return Append(ir.allocators.instructions.Create<ir::Discard>());
+    return Append(ir.allocators.instructions.Create<ir::Discard>(ir.NextInstructionId()));
 }
 
 ir::Var* Builder::Var(const core::type::MemoryView* type) {
-    return Append(ir.allocators.instructions.Create<ir::Var>(InstructionResult(type)));
+    return Append(ir.allocators.instructions.Create<ir::Var>(ir.NextInstructionId(),
+                                                             InstructionResult(type)));
 }
 
 ir::Var* Builder::Var(std::string_view name, const core::type::MemoryView* type) {
@@ -130,21 +131,26 @@ ir::FunctionParam* Builder::FunctionParam(std::string_view name, const core::typ
 }
 
 ir::TerminateInvocation* Builder::TerminateInvocation() {
-    return Append(ir.allocators.instructions.Create<ir::TerminateInvocation>());
+    return Append(
+        ir.allocators.instructions.Create<ir::TerminateInvocation>(ir.NextInstructionId()));
 }
 
 ir::Unreachable* Builder::Unreachable() {
-    return Append(ir.allocators.instructions.Create<ir::Unreachable>());
+    return Append(ir.allocators.instructions.Create<ir::Unreachable>(ir.NextInstructionId()));
+}
+
+ir::Unused* Builder::Unused() {
+    return ir.allocators.values.Create<ir::Unused>();
 }
 
 const core::type::Type* Builder::VectorPtrElementType(const core::type::Type* type) {
     auto* vec_ptr_ty = type->As<core::type::Pointer>();
     TINT_ASSERT(vec_ptr_ty);
-    if (TINT_LIKELY(vec_ptr_ty)) {
+    if (DAWN_LIKELY(vec_ptr_ty)) {
         auto* vec_ty = vec_ptr_ty->StoreType()->As<core::type::Vector>();
         TINT_ASSERT(vec_ty);
-        if (TINT_LIKELY(vec_ty)) {
-            return vec_ty->type();
+        if (DAWN_LIKELY(vec_ty)) {
+            return vec_ty->Type();
         }
     }
     return ir.Types().i32();

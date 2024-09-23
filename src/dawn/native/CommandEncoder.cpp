@@ -824,6 +824,26 @@ ResultOrError<UnpackedPtr<RenderPassDescriptor>> ValidateRenderPassDescriptor(
                         wgpu::LoadOp::ExpandResolveTexture);
     }
 
+    if (const auto* rect = descriptor.Get<RenderPassDescriptorExpandResolveRect>()) {
+        DAWN_INVALID_IF(!device->HasFeature(Feature::DawnPartialLoadResolveTexture),
+                        "RenderPassDescriptorExpandResolveRect can't be used without %s.",
+                        ToAPI(Feature::DawnPartialLoadResolveTexture));
+        DAWN_INVALID_IF(
+            !validationState->WillExpandResolveTexture(),
+            "ExpandResolveRect is invalid to use without wgpu::LoadOp::ExpandResolveTexture.");
+
+        DAWN_INVALID_IF(
+            static_cast<uint64_t>(rect->x) + static_cast<uint64_t>(rect->width) >
+                validationState->GetRenderWidth(),
+            "The x (%u) and width (%u) of ExpandResolveRect is out of the render area width(% u).",
+            rect->x, rect->width, validationState->GetRenderWidth());
+        DAWN_INVALID_IF(static_cast<uint64_t>(rect->y) + static_cast<uint64_t>(rect->height) >
+                            validationState->GetRenderHeight(),
+                        "The y (%u) and height (%u) of ExpandResolveRect is out of the render area "
+                        "height(% u).",
+                        rect->y, rect->height, validationState->GetRenderHeight());
+    }
+
     return descriptor;
 }
 
@@ -1058,12 +1078,8 @@ CommandEncoder::CommandEncoder(DeviceBase* device,
 
 CommandEncoder::CommandEncoder(DeviceBase* device, ObjectBase::ErrorTag tag, const char* label)
     : ApiObjectBase(device, tag, label),
-      mEncodingContext(device, this),
-      mUsageValidationMode(UsageValidationMode::Default) {
-    GetObjectTrackingList()->Track(this);
-
-    mEncodingContext.HandleError(DAWN_VALIDATION_ERROR("%s is invalid.", this));
-}
+      mEncodingContext(device, tag),
+      mUsageValidationMode(UsageValidationMode::Default) {}
 
 ObjectType CommandEncoder::GetType() const {
     return ObjectType::CommandEncoder;
@@ -1190,7 +1206,7 @@ Ref<RenderPassEncoder> CommandEncoder::BeginRenderPass(const RenderPassDescripto
     ClearWithDrawHelper clearWithDrawHelper;
     RenderPassWorkaroundsHelper renderpassWorkaroundsHelper;
 
-    std::function<void()> passEndCallback = nullptr;
+    RenderPassEncoder::EndCallback passEndCallback = nullptr;
 
     bool success = mEncodingContext.TryEncode(
         this,
@@ -1202,7 +1218,7 @@ Ref<RenderPassEncoder> CommandEncoder::BeginRenderPass(const RenderPassDescripto
             DAWN_ASSERT(validationState.IsValidState());
 
             DAWN_TRY(clearWithDrawHelper.Initialize(this, *descriptor));
-            DAWN_TRY(renderpassWorkaroundsHelper.Initialize(this, *descriptor));
+            DAWN_TRY(renderpassWorkaroundsHelper.Initialize(this, descriptor));
 
             mEncodingContext.WillBeginRenderPass();
             BeginRenderPassCmd* cmd =
@@ -1377,8 +1393,8 @@ Ref<RenderPassEncoder> CommandEncoder::BeginRenderPass(const RenderPassDescripto
                 }
             }
 
-            DAWN_TRY(renderpassWorkaroundsHelper.ApplyOnPostEncoding(this, &usageTracker, cmd,
-                                                                     &passEndCallback));
+            DAWN_TRY(renderpassWorkaroundsHelper.ApplyOnPostEncoding(
+                this, descriptor, &usageTracker, cmd, &passEndCallback));
 
             return {};
         },
@@ -1399,8 +1415,8 @@ Ref<RenderPassEncoder> CommandEncoder::BeginRenderPass(const RenderPassDescripto
             // TODO(341129591): move inside RenderPassWorkaroundsHelper.
             DAWN_TRY(clearWithDrawHelper.Apply(passEncoder.Get()));
 
-            DAWN_TRY(renderpassWorkaroundsHelper.ApplyOnRenderPassStart(passEncoder.Get(),
-                                                                        rawDescriptor));
+            DAWN_TRY(
+                renderpassWorkaroundsHelper.ApplyOnRenderPassStart(passEncoder.Get(), descriptor));
 
             return {};
         }();

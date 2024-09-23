@@ -127,12 +127,10 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
 
     MaybeError ValidateObject(const ApiObjectBase* object) const;
 
-    // TODO(dawn:1702) Remove virtual when we mock the adapter.
-    virtual InstanceBase* GetInstance() const;
-
+    InstanceBase* GetInstance() const;
     AdapterBase* GetAdapter() const;
     PhysicalDeviceBase* GetPhysicalDevice() const;
-    virtual dawn::platform::Platform* GetPlatform() const;
+    dawn::platform::Platform* GetPlatform() const;
 
     // Returns the Format corresponding to the wgpu::TextureFormat or an error if the format
     // isn't a valid wgpu::TextureFormat or isn't supported by this device.
@@ -457,6 +455,8 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
     Ref<RenderPipelineBase> AddOrGetCachedRenderPipeline(Ref<RenderPipelineBase> renderPipeline);
 
     void DumpMemoryStatistics(dawn::native::MemoryDump* dump) const;
+    uint64_t ComputeEstimatedMemoryUsage() const;
+    void ReduceMemoryUsage();
 
     ResultOrError<Ref<BufferBase>> GetOrCreateTemporaryUniformBuffer(size_t size);
 
@@ -464,7 +464,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
     // Constructor used only for mocking and testing.
     DeviceBase();
 
-    void ForceSetToggleForTesting(Toggle toggle, bool isEnabled);
     void ForceEnableFeatureForTesting(Feature feature);
 
     MaybeError Initialize(Ref<QueueBase> defaultQueue);

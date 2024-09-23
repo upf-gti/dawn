@@ -39,6 +39,7 @@
 #include "dawn/native/metal/BufferMTL.h"
 #include "dawn/native/metal/DeviceMTL.h"
 #include "dawn/native/metal/UtilsMetal.h"
+#include "dawn/platform/DawnPlatform.h"
 
 #if DAWN_PLATFORM_IS(MACOS)
 #import <IOKit/IOKitLib.h>
@@ -500,6 +501,10 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
                                gpu_info::IsIrisPlus655(deviceId));
     }
 
+    // Use the Tint IR backend by default if the corresponding platform feature is enabled.
+    deviceToggles->Default(Toggle::UseTintIR,
+                           platform->IsFeatureEnabled(platform::Features::kWebGPUUseTintIR));
+
 #if DAWN_PLATFORM_IS(MACOS)
     if (gpu_info::IsIntel(vendorId)) {
         deviceToggles->Default(
@@ -546,6 +551,14 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     if (isLessThanAMDGN4OrMac13Dot1) {
         deviceToggles->Default(
             Toggle::MetalUseBothDepthAndStencilAttachmentsForCombinedDepthStencilFormats, true);
+    }
+
+    // Packed 4x8 integer dot products fail on Macbook Pro 16" with AMD Radeon Pro 5300M,
+    // which are the RDNA1 architecture.
+    // Conservatively, polyfill these functions on RDNA1 and RDNA2.
+    // crbug.com/355485146
+    if (gpu_info::IsAMDRDNA1(vendorId, deviceId) || gpu_info::IsAMDRDNA2(vendorId, deviceId)) {
+        deviceToggles->Default(Toggle::PolyFillPacked4x8DotProduct, true);
     }
 #endif
 }
@@ -714,6 +727,7 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::R8UnormStorage);
     EnableFeature(Feature::ShaderModuleCompilationOptions);
     EnableFeature(Feature::DawnLoadResolveTexture);
+    EnableFeature(Feature::ClipDistances);
 
     // SIMD-scoped permute operations is supported by GPU family Metal3, Apple6, Apple7, Apple8,
     // and Mac2.

@@ -112,22 +112,27 @@ ast::transform::Transform::ApplyResult PadStructs::Apply(const Program& src,
             auto* ty = mem->Type();
             auto type = CreateASTTypeFor(ctx, ty);
 
-            new_members.Push(b.Member(name, type));
-
             uint32_t size = ty->Size();
             if (ty->Is<core::type::Struct>() && str->UsedAs(core::AddressSpace::kUniform)) {
                 // std140 structs should be padded out to 16 bytes.
-                size = tint::RoundUp(16u, size);
+                uint32_t rounded_size = tint::RoundUp(16u, size);
+
+                // Add a @size attribute to satisfy WGSL validator rules.
+                // But do not add manual padding for the part of (rounded_size - size),
+                // which is implicitly padded by std140.
+                new_members.Push(
+                    b.Member(name, type, tint::Vector{b.MemberSize(core::AInt(rounded_size))}));
+
+                offset += rounded_size;
+            } else {
+                new_members.Push(b.Member(name, type));
+                offset += size;
             }
-            offset += size;
         }
+
+        uint32_t struct_size = str->Size();
 
         // Add any required padding after the last member, if it's not a block.
-        uint32_t struct_size = str->Size();
-        if (str->UsedAs(core::AddressSpace::kUniform)) {
-            struct_size = tint::RoundUp(16u, struct_size);
-        }
-
         bool is_block = ast::HasAttribute<ast::transform::AddBlockAttribute::BlockAttribute>(
             ast_str->attributes);
         if (offset < struct_size && !is_block) {
