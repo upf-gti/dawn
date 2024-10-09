@@ -1,11 +1,27 @@
-SKIP: FAILED
+#version 310 es
+precision highp float;
+precision highp int;
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:350 internal compiler error: Switch() matched no cases. Type: tint::core::type::StorageTexture
-********************************************************************
-*  The tint shader compiler has encountered an unexpected error.   *
-*                                                                  *
-*  Please help us fix this issue by submitting a bug report at     *
-*  crbug.com/tint with the source program that triggered the bug.  *
-********************************************************************
+layout(binding = 0, rgba32ui) uniform highp writeonly uimage2D arg_0;
+void textureStore_aeb38a() {
+  uvec2 arg_1 = uvec2(1u);
+  uvec4 arg_2 = uvec4(1u);
+  uvec4 v = arg_2;
+  imageStore(arg_0, ivec2(arg_1), v);
+}
+void main() {
+  textureStore_aeb38a();
+}
+#version 310 es
 
-tint executable returned error: signal: illegal instruction
+layout(binding = 0, rgba32ui) uniform highp writeonly uimage2D arg_0;
+void textureStore_aeb38a() {
+  uvec2 arg_1 = uvec2(1u);
+  uvec4 arg_2 = uvec4(1u);
+  uvec4 v = arg_2;
+  imageStore(arg_0, ivec2(arg_1), v);
+}
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+void main() {
+  textureStore_aeb38a();
+}

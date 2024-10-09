@@ -336,16 +336,15 @@ TEST(WireCreatePipelineAsyncTestNullBackend, ServerDeletedBeforeCallback) {
     ASSERT_TRUE(c2sBuf->Flush());
     ASSERT_TRUE(s2cBuf->Flush());
 
-    WGPUShaderModuleWGSLDescriptor wgslDesc = {};
-    wgslDesc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgslDesc.code = "@compute @workgroup_size(64) fn main() {}";
+    WGPUShaderSourceWGSL wgslDesc = WGPU_SHADER_SOURCE_WGSL_INIT;
+    wgslDesc.code.data = "@compute @workgroup_size(64) fn main() {}";
 
     WGPUShaderModuleDescriptor smDesc = {};
     smDesc.nextInChain = &wgslDesc.chain;
 
     WGPUShaderModule sm = wgpuDeviceCreateShaderModule(device, &smDesc);
 
-    WGPUComputePipelineDescriptor computeDesc = {};
+    WGPUComputePipelineDescriptor computeDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
     computeDesc.compute.module = sm;
 
     WGPUComputePipeline pipeline = nullptr;

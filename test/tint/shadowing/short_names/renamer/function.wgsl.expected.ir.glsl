@@ -1,11 +1,20 @@
-SKIP: FAILED
+#version 310 es
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:482 internal compiler error: Switch() matched no cases. Type: tint::core::ir::Convert
-********************************************************************
-*  The tint shader compiler has encountered an unexpected error.   *
-*                                                                  *
-*  Please help us fix this issue by submitting a bug report at     *
-*  crbug.com/tint with the source program that triggered the bug.  *
-********************************************************************
-
-tint executable returned error: signal: illegal instruction
+int vec4f() {
+  return 0;
+}
+float vec2f(int i) {
+  return float(i);
+}
+bool vec2i(float f) {
+  return bool(f);
+}
+vec4 tint_symbol_inner(uint VertexIndex) {
+  return mix(vec4(0.0f), vec4(1.0f), bvec4(vec2i(vec2f(vec4f()))));
+}
+void main() {
+  gl_Position = tint_symbol_inner(uint(gl_VertexID));
+  gl_Position[1u] = -(gl_Position.y);
+  gl_Position[2u] = ((2.0f * gl_Position.z) - gl_Position.w);
+  gl_PointSize = 1.0f;
+}

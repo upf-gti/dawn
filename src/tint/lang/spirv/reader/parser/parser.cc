@@ -153,6 +153,8 @@ class Parser {
                 return core::BuiltinValue::kVertexIndex;
             case spv::BuiltIn::WorkgroupId:
                 return core::BuiltinValue::kWorkgroupId;
+            case spv::BuiltIn::ClipDistance:
+                return core::BuiltinValue::kClipDistances;
             default:
                 TINT_UNIMPLEMENTED() << "unhandled SPIR-V BuiltIn: " << static_cast<uint32_t>(b);
         }
@@ -645,6 +647,9 @@ class Parser {
                     break;
                 case spv::Decoration::Sample:
                     interpolation().sampling = core::InterpolationSampling::kSample;
+                    break;
+                case spv::Decoration::Index:
+                    io_attributes.blend_src = deco->GetSingleWordOperand(2);
                     break;
                 default:
                     TINT_UNIMPLEMENTED() << "unhandled decoration " << d;

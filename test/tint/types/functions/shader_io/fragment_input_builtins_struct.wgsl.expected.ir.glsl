@@ -1,11 +1,25 @@
-SKIP: FAILED
+#version 310 es
+#extension GL_OES_sample_variables: require
+precision highp float;
+precision highp int;
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:252 internal compiler error: Switch() matched no cases. Type: tint::core::ir::If
-********************************************************************
-*  The tint shader compiler has encountered an unexpected error.   *
-*                                                                  *
-*  Please help us fix this issue by submitting a bug report at     *
-*  crbug.com/tint with the source program that triggered the bug.  *
-********************************************************************
 
-tint executable returned error: signal: illegal instruction
+struct FragmentInputs {
+  vec4 position;
+  bool front_facing;
+  uint sample_index;
+  uint sample_mask;
+};
+
+void tint_symbol_inner(FragmentInputs inputs) {
+  if (inputs.front_facing) {
+    vec4 foo = inputs.position;
+    uint bar = (inputs.sample_index + inputs.sample_mask);
+  }
+}
+void main() {
+  vec4 v = gl_FragCoord;
+  bool v_1 = gl_FrontFacing;
+  uint v_2 = uint(gl_SampleID);
+  tint_symbol_inner(FragmentInputs(v, v_1, v_2, uint(gl_SampleMaskIn[0u])));
+}

@@ -30,14 +30,15 @@
 
 #include <vector>
 
-#include "dawn/native/SwapChain.h"
-
 #include "dawn/common/vulkan_platform.h"
 #include "dawn/native/IntegerTypes.h"
+#include "dawn/native/SwapChain.h"
+#include "dawn/native/vulkan/UniqueVkHandle.h"
 
 namespace dawn::native::vulkan {
 
 class Device;
+class SwapChainTexture;
 class Texture;
 class PhysicalDevice;
 struct VulkanSurfaceInfo;
@@ -54,7 +55,6 @@ class SwapChain : public SwapChainBase {
   private:
     using SwapChainBase::SwapChainBase;
     MaybeError Initialize(SwapChainBase* previousSwapChain);
-    void DestroyImpl() override;
 
     struct Config {
         // Information that's passed to vulkan swapchain creation.
@@ -91,10 +91,10 @@ class SwapChain : public SwapChainBase {
     struct PerImage {
         VkImage image;
         // Used for the rendering -> present dependency, we need one semaphore per image because a
-        // present tehcnically not be started when signal the semaphore for the next frame.
-        VkSemaphore semaphore;
-        // Used for frame pacing.
-        ExecutionSerial lastRendered = kBeginningOfGPUTime;
+        // present may technically not be started when we signal the semaphore for the next frame.
+        UniqueVkHandle<VkSemaphore> renderingDoneSemaphore;
+        // Used for the last time acquired -> CPU wait for frame pacing.
+        UniqueVkHandle<VkFence> lastAcquireDoneFence;
     };
     std::vector<PerImage> mImages;
     uint32_t mLastImageIndex = 0;

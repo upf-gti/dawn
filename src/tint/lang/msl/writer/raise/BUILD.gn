@@ -57,6 +57,10 @@ if (tint_build_msl_writer) {
       "raise.h",
       "shader_io.cc",
       "shader_io.h",
+      "simd_ballot.cc",
+      "simd_ballot.h",
+      "unary_polyfill.cc",
+      "unary_polyfill.h",
     ]
     deps = [
       "${dawn_root}/src/utils:utils",
@@ -67,7 +71,6 @@ if (tint_build_msl_writer) {
       "${tint_src_dir}/lang/core/intrinsic",
       "${tint_src_dir}/lang/core/ir",
       "${tint_src_dir}/lang/core/ir/transform",
-      "${tint_src_dir}/lang/core/ir/transform/common",
       "${tint_src_dir}/lang/core/type",
       "${tint_src_dir}/lang/msl",
       "${tint_src_dir}/lang/msl/intrinsic",
@@ -102,6 +105,8 @@ if (tint_build_unittests) {
         "module_scope_vars_test.cc",
         "packed_vec3_test.cc",
         "shader_io_test.cc",
+        "simd_ballot_test.cc",
+        "unary_polyfill_test.cc",
       ]
       deps = [
         "${dawn_root}/src/utils:utils",

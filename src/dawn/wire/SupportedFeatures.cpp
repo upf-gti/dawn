@@ -36,7 +36,6 @@ bool IsFeatureSupported(WGPUFeatureName feature) {
         case WGPUFeatureName_Force32:
         case WGPUFeatureName_DawnNative:
         case WGPUFeatureName_ImplicitDeviceSynchronization:
-        case WGPUFeatureName_SurfaceCapabilities:
         case WGPUFeatureName_D3D11MultithreadProtected:
         case WGPUFeatureName_HostMappedPointer:
         case WGPUFeatureName_BufferMapExtendedUsages:
@@ -113,6 +112,7 @@ bool IsFeatureSupported(WGPUFeatureName feature) {
         case WGPUFeatureName_Subgroups:
         case WGPUFeatureName_SubgroupsF16:
         case WGPUFeatureName_ClipDistances:
+        case WGPUFeatureName_ChromiumExperimentalImmediateData:
             return true;
     }
 

@@ -166,7 +166,7 @@ TEST_F(WireArgumentTests, CStringArgument) {
     EXPECT_CALL(api,
                 DeviceCreateRenderPipeline(
                     apiDevice, MatchesLambda([](const WGPURenderPipelineDescriptor* desc) -> bool {
-                        return desc->vertex.entryPoint == std::string("main");
+                        return std::string_view(desc->vertex.entryPoint.data) == "main";
                     })))
         .WillOnce(Return(apiPlaceholderPipeline));
 
@@ -220,7 +220,7 @@ TEST_F(WireArgumentTests, WGPUStringView) {
     vsModule.SetLabel(std::nullopt);
     EXPECT_CALL(api, ShaderModuleSetLabel2(apiVsModule,
                                            AllOf(Field(&WGPUStringView::data, nullptr),
-                                                 Field(&WGPUStringView::length, Eq(SIZE_MAX)))));
+                                                 Field(&WGPUStringView::length, Eq(WGPU_STRLEN)))));
     FlushClient();
 }
 

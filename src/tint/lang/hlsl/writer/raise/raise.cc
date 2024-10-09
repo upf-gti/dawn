@@ -38,6 +38,7 @@
 #include "src/tint/lang/core/ir/transform/demote_to_helper.h"
 #include "src/tint/lang/core/ir/transform/direct_variable_access.h"
 #include "src/tint/lang/core/ir/transform/multiplanar_external_texture.h"
+#include "src/tint/lang/core/ir/transform/remove_continue_in_switch.h"
 #include "src/tint/lang/core/ir/transform/remove_terminator_args.h"
 #include "src/tint/lang/core/ir/transform/rename_conflicts.h"
 #include "src/tint/lang/core/ir/transform/robustness.h"
@@ -51,6 +52,7 @@
 #include "src/tint/lang/hlsl/writer/raise/decompose_storage_access.h"
 #include "src/tint/lang/hlsl/writer/raise/decompose_uniform_access.h"
 #include "src/tint/lang/hlsl/writer/raise/fxc_polyfill.h"
+#include "src/tint/lang/hlsl/writer/raise/localize_struct_array_assignment.h"
 #include "src/tint/lang/hlsl/writer/raise/promote_initializers.h"
 #include "src/tint/lang/hlsl/writer/raise/shader_io.h"
 #include "src/tint/utils/result/result.h"
@@ -109,7 +111,7 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
         core_polyfills.extract_bits = core::ir::transform::BuiltinPolyfillLevel::kFull;
         core_polyfills.first_leading_bit = true;
         core_polyfills.first_trailing_bit = true;
-        // core_polyfills.fwidth_fine = true;
+        core_polyfills.fwidth_fine = true;
         core_polyfills.insert_bits = core::ir::transform::BuiltinPolyfillLevel::kFull;
         // core_polyfills.int_div_mod = !options.disable_polyfill_integer_div_mod;
 
@@ -135,6 +137,7 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
 
     if (options.compiler == Options::Compiler::kFXC) {
         RUN_TRANSFORM(raise::FxcPolyfill, module);
+        RUN_TRANSFORM(raise::LocalizeStructArrayAssignment, module);
     }
 
     if (!options.disable_robustness) {
@@ -153,6 +156,19 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
         RUN_TRANSFORM(core::ir::transform::Robustness, module, config);
     }
 
+    if (!options.disable_workgroup_init) {
+        // Must run before ShaderIO as it may introduce a builtin parameter (local_invocation_index)
+        RUN_TRANSFORM(core::ir::transform::ZeroInitWorkgroupMemory, module);
+    }
+
+    // ShaderIO must be run before DecomposeUniformAccess because it might
+    // introduce a uniform buffer for kNumWorkgroups.
+    {
+        raise::ShaderIOConfig config;
+        config.num_workgroups_binding = options.root_constant_binding_point;
+        RUN_TRANSFORM(raise::ShaderIO, module, config);
+    }
+
     RUN_TRANSFORM(core::ir::transform::DirectVariableAccess, module,
                   core::ir::transform::DirectVariableAccessOptions{});
     // DecomposeStorageAccess must come after Robustness and DirectVariableAccess
@@ -160,18 +176,11 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
     // Comes after DecomposeStorageAccess.
     RUN_TRANSFORM(raise::DecomposeUniformAccess, module);
 
-    if (!options.disable_workgroup_init) {
-        RUN_TRANSFORM(core::ir::transform::ZeroInitWorkgroupMemory, module);
-    }
-
     // TODO(dsinclair): LocalizeStructArrayAssignment
     // TODO(dsinclair): PixelLocal transform
     // TODO(dsinclair): TruncateInterstageVariables
-    // TODO(dsinclair): NumWorkgroupsFromUniform
     // TODO(dsinclair): CalculateArrayLength
-    // TODO(dsinclair): RemoveContinueInSwitch
 
-    RUN_TRANSFORM(raise::ShaderIO, module);
     // DemoteToHelper must come before any transform that introduces non-core instructions.
     // Run after ShaderIO to ensure the discards are added to the entry point it introduces.
     RUN_TRANSFORM(core::ir::transform::DemoteToHelper, module);
@@ -181,12 +190,17 @@ Result<SuccessType> Raise(core::ir::Module& module, const Options& options) {
     // builtins
     RUN_TRANSFORM(raise::BuiltinPolyfill, module);
     RUN_TRANSFORM(core::ir::transform::VectorizeScalarMatrixConstructors, module);
+    RUN_TRANSFORM(core::ir::transform::RemoveContinueInSwitch, module);
 
     // These transforms need to be run last as various transforms introduce terminator arguments,
     // naming conflicts, and expressions that need to be explicitly not inlined.
     RUN_TRANSFORM(core::ir::transform::RemoveTerminatorArgs, module);
     RUN_TRANSFORM(core::ir::transform::RenameConflicts, module);
-    RUN_TRANSFORM(core::ir::transform::ValueToLet, module);
+    {
+        core::ir::transform::ValueToLetConfig cfg;
+        cfg.replace_pointer_lets = true;
+        RUN_TRANSFORM(core::ir::transform::ValueToLet, module, cfg);
+    }
 
     // Anything which runs after this needs to handle `Capabilities::kAllowModuleScopedLets`
     RUN_TRANSFORM(raise::PromoteInitializers, module);

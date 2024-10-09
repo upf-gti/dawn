@@ -108,6 +108,7 @@ wgpu::Status AdapterBase::APIGetLimits(SupportedLimits* limits) const {
 
     // TODO(349125474): Deprecate DawnExperimentalSubgroupLimits.
     if (auto* subgroupLimits = unpacked.Get<DawnExperimentalSubgroupLimits>()) {
+        wgpu::ChainedStructOut* originalChain = subgroupLimits->nextInChain;
         if (!mSupportedFeatures.IsEnabled(wgpu::FeatureName::Subgroups)) {
             // If subgroups features are not supported, return the default-initialized
             // DawnExperimentalSubgroupLimits object, where minSubgroupSize and
@@ -117,6 +118,26 @@ wgpu::Status AdapterBase::APIGetLimits(SupportedLimits* limits) const {
             // If adapter supports subgroups features, always return the valid subgroup limits.
             *subgroupLimits = mPhysicalDevice->GetLimits().experimentalSubgroupLimits;
         }
+
+        // Recover origin chain.
+        subgroupLimits->nextInChain = originalChain;
+    }
+
+    if (auto* immediateDataLimits = unpacked.Get<DawnExperimentalImmediateDataLimits>()) {
+        wgpu::ChainedStructOut* originalChain = immediateDataLimits->nextInChain;
+        if (!mSupportedFeatures.IsEnabled(wgpu::FeatureName::ChromiumExperimentalImmediateData)) {
+            // If immediate data features are not supported, return the default-initialized
+            // DawnExperimentalImmediateDataLimits object, where maxImmediateDataByteSize is
+            // WGPU_LIMIT_U32_UNDEFINED.
+            *immediateDataLimits = DawnExperimentalImmediateDataLimits{};
+        } else {
+            // If adapter supports immediate data features, always return the valid immediate data
+            // limits.
+            *immediateDataLimits = mPhysicalDevice->GetLimits().experimentalImmediateDataLimits;
+        }
+
+        // Recover origin chain.
+        immediateDataLimits->nextInChain = originalChain;
     }
 
     return wgpu::Status::Success;
@@ -125,11 +146,36 @@ wgpu::Status AdapterBase::APIGetLimits(SupportedLimits* limits) const {
 wgpu::Status AdapterBase::APIGetInfo(AdapterInfo* info) const {
     DAWN_ASSERT(info != nullptr);
 
-    AdapterProperties properties = {};
-    properties.nextInChain = info->nextInChain;
-    if (GetPropertiesInternal(&properties) == wgpu::Status::Error) {
+    UnpackedPtr<AdapterInfo> unpacked;
+    if (mInstance->ConsumedError(ValidateAndUnpack(info), &unpacked)) {
         return wgpu::Status::Error;
     }
+
+    bool hadError = false;
+    if (unpacked.Get<AdapterPropertiesMemoryHeaps>() != nullptr &&
+        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesMemoryHeaps)) {
+        hadError |= mInstance->ConsumedError(
+            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesMemoryHeaps is not available."));
+    }
+    if (unpacked.Get<AdapterPropertiesD3D>() != nullptr &&
+        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesD3D)) {
+        hadError |= mInstance->ConsumedError(
+            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesD3D is not available."));
+    }
+    if (unpacked.Get<AdapterPropertiesVk>() != nullptr &&
+        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesVk)) {
+        hadError |= mInstance->ConsumedError(
+            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesVk is not available."));
+    }
+    if (hadError) {
+        return wgpu::Status::Error;
+    }
+
+    if (auto* powerPreferenceDesc = unpacked.Get<DawnAdapterPropertiesPowerPreference>()) {
+        powerPreferenceDesc->powerPreference = mPowerPreference;
+    }
+
+    mPhysicalDevice->PopulateBackendProperties(unpacked);
 
     // Get lengths, with null terminators.
     size_t vendorCLen = mPhysicalDevice->GetVendorName().length() + 1;
@@ -165,86 +211,9 @@ wgpu::Status AdapterBase::APIGetInfo(AdapterInfo* info) const {
     return wgpu::Status::Success;
 }
 
-wgpu::Status AdapterBase::APIGetProperties(AdapterProperties* properties) const {
-    mInstance->EmitDeprecationWarning("GetProperties is deprecated, use GetInfo instead.");
-    return GetPropertiesInternal(properties);
-}
-
-wgpu::Status AdapterBase::GetPropertiesInternal(AdapterProperties* properties) const {
-    DAWN_ASSERT(properties != nullptr);
-    UnpackedPtr<AdapterProperties> unpacked;
-    if (mInstance->ConsumedError(ValidateAndUnpack(properties), &unpacked)) {
-        return wgpu::Status::Error;
-    }
-
-    bool hadError = false;
-    if (unpacked.Get<AdapterPropertiesMemoryHeaps>() != nullptr &&
-        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesMemoryHeaps)) {
-        hadError |= mInstance->ConsumedError(
-            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesMemoryHeaps is not available."));
-    }
-    if (unpacked.Get<AdapterPropertiesD3D>() != nullptr &&
-        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesD3D)) {
-        hadError |= mInstance->ConsumedError(
-            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesD3D is not available."));
-    }
-    if (unpacked.Get<AdapterPropertiesVk>() != nullptr &&
-        !mSupportedFeatures.IsEnabled(wgpu::FeatureName::AdapterPropertiesVk)) {
-        hadError |= mInstance->ConsumedError(
-            DAWN_VALIDATION_ERROR("Feature AdapterPropertiesVk is not available."));
-    }
-    if (hadError) {
-        return wgpu::Status::Error;
-    }
-
-    if (auto* powerPreferenceDesc = unpacked.Get<DawnAdapterPropertiesPowerPreference>()) {
-        powerPreferenceDesc->powerPreference = mPowerPreference;
-    }
-
-    mPhysicalDevice->PopulateBackendProperties(unpacked);
-
-    properties->vendorID = mPhysicalDevice->GetVendorId();
-    properties->deviceID = mPhysicalDevice->GetDeviceId();
-    properties->adapterType = mPhysicalDevice->GetAdapterType();
-    properties->backendType = mPhysicalDevice->GetBackendType();
-    properties->compatibilityMode = mFeatureLevel == FeatureLevel::Compatibility;
-
-    // Get lengths, with null terminators.
-    size_t vendorNameCLen = mPhysicalDevice->GetVendorName().length() + 1;
-    size_t architectureCLen = mPhysicalDevice->GetArchitectureName().length() + 1;
-    size_t nameCLen = mPhysicalDevice->GetName().length() + 1;
-    size_t driverDescriptionCLen = mPhysicalDevice->GetDriverDescription().length() + 1;
-
-    // Allocate space for all strings.
-    char* ptr = new char[vendorNameCLen + architectureCLen + nameCLen + driverDescriptionCLen];
-
-    properties->vendorName = ptr;
-    memcpy(ptr, mPhysicalDevice->GetVendorName().c_str(), vendorNameCLen);
-    ptr += vendorNameCLen;
-
-    properties->architecture = ptr;
-    memcpy(ptr, mPhysicalDevice->GetArchitectureName().c_str(), architectureCLen);
-    ptr += architectureCLen;
-
-    properties->name = ptr;
-    memcpy(ptr, mPhysicalDevice->GetName().c_str(), nameCLen);
-    ptr += nameCLen;
-
-    properties->driverDescription = ptr;
-    memcpy(ptr, mPhysicalDevice->GetDriverDescription().c_str(), driverDescriptionCLen);
-    ptr += driverDescriptionCLen;
-
-    return wgpu::Status::Success;
-}
-
 void APIAdapterInfoFreeMembers(WGPUAdapterInfo info) {
     // This single delete is enough because everything is a single allocation.
     delete[] info.vendor;
-}
-
-void APIAdapterPropertiesFreeMembers(WGPUAdapterProperties properties) {
-    // This single delete is enough because everything is a single allocation.
-    delete[] properties.vendorName;
 }
 
 void APIAdapterPropertiesMemoryHeapsFreeMembers(
@@ -326,6 +295,20 @@ ResultOrError<Ref<DeviceBase>> AdapterBase::CreateDeviceInternal(
         DAWN_INVALID_IF(!result.success, "Invalid feature required: %s",
                         result.errorMessage.c_str());
     }
+    // Validate features dependency.
+    // TODO(349125474): Decide if this validation is needed, see
+    // https://github.com/gpuweb/gpuweb/issues/4734 for detail.
+    if (requiredFeatureSet.count(wgpu::FeatureName::SubgroupsF16) > 0) {
+        // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
+        DAWN_INVALID_IF(
+            (requiredFeatureSet.count(wgpu::FeatureName::Subgroups) == 0) &&
+                (requiredFeatureSet.count(wgpu::FeatureName::ChromiumExperimentalSubgroups) == 0),
+            "Feature %s must be required together with feature %s.",
+            wgpu::FeatureName::SubgroupsF16, wgpu::FeatureName::Subgroups);
+        DAWN_INVALID_IF(requiredFeatureSet.count(wgpu::FeatureName::ShaderF16) == 0,
+                        "Feature %s must be required together with feature %s.",
+                        wgpu::FeatureName::SubgroupsF16, wgpu::FeatureName::ShaderF16);
+    }
 
     if (descriptor->requiredLimits != nullptr) {
         // Only consider limits in RequiredLimits structure, and currently no chained structure
@@ -349,13 +332,17 @@ AdapterBase::CreateDevice(const DeviceDescriptor* descriptor) {
     DAWN_ASSERT(descriptor != nullptr);
 
     Ref<DeviceBase::DeviceLostEvent> lostEvent = DeviceBase::DeviceLostEvent::Create(descriptor);
-
     auto result = CreateDeviceInternal(descriptor, lostEvent);
+
+    // Catch any errors to directly complete the device lost event with the error message.
     if (result.IsError()) {
+        auto error = result.AcquireError();
         lostEvent->mReason = wgpu::DeviceLostReason::FailedCreation;
-        lostEvent->mMessage = "Failed to create device.";
+        lostEvent->mMessage = "Failed to create device:\n" + error->GetFormattedMessage();
         mInstance->GetEventManager()->SetFutureReady(lostEvent.Get());
+        return {lostEvent, std::move(error)};
     }
+
     return {lostEvent, std::move(result)};
 }
 

@@ -37,7 +37,6 @@
 #include "src/dawn/node/binding/GPUQuerySet.h"
 #include "src/dawn/node/binding/GPURenderPassEncoder.h"
 #include "src/dawn/node/binding/GPUTexture.h"
-#include "src/dawn/node/utils/Debug.h"
 
 namespace wgpu::binding {
 
@@ -47,7 +46,7 @@ namespace wgpu::binding {
 GPUCommandEncoder::GPUCommandEncoder(wgpu::Device device,
                                      const wgpu::CommandEncoderDescriptor& desc,
                                      wgpu::CommandEncoder enc)
-    : device_(std::move(device)), enc_(std::move(enc)), label_(desc.label ? desc.label : "") {}
+    : device_(std::move(device)), enc_(std::move(enc)), label_(CopyLabel(desc.label)) {}
 
 interop::Interface<interop::GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
     Napi::Env env,
@@ -55,7 +54,7 @@ interop::Interface<interop::GPURenderPassEncoder> GPUCommandEncoder::beginRender
     Converter conv(env, device_);
 
     wgpu::RenderPassDescriptor desc{};
-    wgpu::RenderPassDescriptorMaxDrawCount maxDrawCountDesc{};
+    wgpu::RenderPassMaxDrawCount maxDrawCountDesc{};
     desc.nextInChain = &maxDrawCountDesc;
 
     if (!conv(desc.colorAttachments, desc.colorAttachmentCount, descriptor.colorAttachments) ||
@@ -235,7 +234,7 @@ std::string GPUCommandEncoder::getLabel(Napi::Env) {
 }
 
 void GPUCommandEncoder::setLabel(Napi::Env, std::string value) {
-    enc_.SetLabel(value.c_str());
+    enc_.SetLabel(std::string_view(value));
     label_ = value;
 }
 

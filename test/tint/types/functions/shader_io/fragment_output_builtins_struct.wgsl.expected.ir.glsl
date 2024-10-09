@@ -1,21 +1,25 @@
-SKIP: FAILED
-
 #version 310 es
+#extension GL_OES_sample_variables: require
+precision highp float;
+precision highp int;
+
+
+struct tint_push_constant_struct {
+  float tint_frag_depth_min;
+  float tint_frag_depth_max;
+};
 
 struct FragmentOutputs {
   float frag_depth;
   uint sample_mask;
 };
 
-FragmentOutputs main() {
+layout(location = 0) uniform tint_push_constant_struct tint_push_constants;
+FragmentOutputs tint_symbol_inner() {
   return FragmentOutputs(1.0f, 1u);
 }
-error: Error parsing GLSL shader:
-ERROR: 0:4: 'float' : type requires declaration of default precision qualifier 
-ERROR: 0:4: '' : compilation terminated 
-ERROR: 2 compilation errors.  No code generated.
-
-
-
-
-tint executable returned error: exit status 1
+void main() {
+  FragmentOutputs v = tint_symbol_inner();
+  gl_FragDepth = clamp(v.frag_depth, tint_push_constants.tint_frag_depth_min, tint_push_constants.tint_frag_depth_max);
+  gl_SampleMask[0u] = int(v.sample_mask);
+}

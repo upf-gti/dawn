@@ -63,6 +63,7 @@
 #include "src/tint/lang/core/ir/member_builtin_call.h"
 #include "src/tint/lang/core/ir/multi_in_block.h"
 #include "src/tint/lang/core/ir/next_iteration.h"
+#include "src/tint/lang/core/ir/referenced_module_vars.h"
 #include "src/tint/lang/core/ir/return.h"
 #include "src/tint/lang/core/ir/store.h"
 #include "src/tint/lang/core/ir/store_vector_element.h"
@@ -75,6 +76,7 @@
 #include "src/tint/lang/core/ir/user_call.h"
 #include "src/tint/lang/core/ir/var.h"
 #include "src/tint/lang/core/type/bool.h"
+#include "src/tint/lang/core/type/f32.h"
 #include "src/tint/lang/core/type/i8.h"
 #include "src/tint/lang/core/type/memory_view.h"
 #include "src/tint/lang/core/type/pointer.h"
@@ -125,6 +127,33 @@ bool TransitivelyHolds(const Block* block, const Instruction* inst) {
         }
     }
     return false;
+}
+
+/// @returns true if @p attr contains both a location and builtin decoration
+bool HasLocationAndBuiltin(const tint::core::IOAttributes& attr) {
+    return attr.builtin.has_value() && attr.location.has_value();
+}
+
+/// @returns true if @p attr contains one of either location or builtin decoration
+bool HasEitherLocationOrBuiltin(const tint::core::IOAttributes& attr) {
+    return (attr.builtin.has_value() && !attr.location.has_value()) ||
+           (!attr.builtin.has_value() && attr.location.has_value());
+}
+
+/// @return true if @param attr does not have invariant decoration or if it also has position
+/// decoration
+bool InvariantOnlyIfAlsoPosition(const tint::core::IOAttributes& attr) {
+    return !attr.invariant || attr.builtin == BuiltinValue::kPosition;
+}
+
+/// @returns true if @p ty meets the basic function parameter rules (i.e. one of constructible,
+///          pointer, sampler or texture).
+///
+/// Note: Does not handle corner cases like if certain capabilities are
+/// enabled.
+bool IsValidFunctionParamType(const core::type::Type* ty) {
+    return ty->IsConstructible() || ty->Is<type::Pointer>() || ty->Is<type::Texture>() ||
+           ty->Is<type::Sampler>();
 }
 
 /// The core IR validator.
@@ -343,13 +372,6 @@ class Validator {
                                  size_t num_results,
                                  size_t num_operands);
 
-    /// Checks the given operand is not null
-    /// @param inst the instruction
-    /// @param operand the operand
-    /// @param idx the operand index
-    // TODO(345196551): Remove this override once it is no longer used.
-    void CheckOperandNotNull(const ir::Instruction* inst, const ir::Value* operand, size_t idx);
-
     /// Checks that @p type does not use any types that are prohibited by the target capabilities.
     /// @param type the type
     /// @param diag a function that creates an error diagnostic for the source of the type
@@ -363,8 +385,22 @@ class Validator {
     void CheckRootBlock(const Block* blk);
 
     /// Validates the given function
-    /// @param func the function validate
+    /// @param func the function to validate
     void CheckFunction(const Function* func);
+
+    /// Validates the specific function as a vertex entry point
+    /// @param ep the function to validate
+    void CheckVertexEntryPoint(const Function* ep);
+
+    /// Validates that the type annotated with @builtin(position) is correct
+    /// @param ep the entry point to associate errors with
+    /// @param type the type to validate
+    void CheckBuiltinPosition(const Function* ep, const core::type::Type* type);
+
+    /// Validates that the type annotated with @builtin(clip_distances) is correct
+    /// @param ep the entry point to associate errors with
+    /// @param type the type to validate
+    void CheckBuiltinClipDistances(const Function* ep, const core::type::Type* type);
 
     /// Validates the given instruction
     /// @param inst the instruction to validate
@@ -375,8 +411,8 @@ class Validator {
     void CheckVar(const Var* var);
 
     /// Validates the given let
-    /// @param let the let to validate
-    void CheckLet(const Let* let);
+    /// @param l the let to validate
+    void CheckLet(const Let* l);
 
     /// Validates the given call
     /// @param call the call to validate
@@ -475,6 +511,10 @@ class Validator {
     /// Validates the given return
     /// @param r the return to validate
     void CheckReturn(const Return* r);
+
+    /// Validates the given unreachable
+    /// @param u the unreachable to validate
+    void CheckUnreachable(const Unreachable* u);
 
     /// Validates the @p exit targets a valid @p control instruction where the instruction may jump
     /// over if control instructions.
@@ -612,10 +652,11 @@ class Validator {
     Hashmap<const ir::Block*, const ir::Function*, 64> block_to_function_{};
     Hashmap<const ir::Function*, Hashset<const ir::UserCall*, 4>, 4> user_func_calls_;
     Hashset<const ir::Discard*, 4> discards_;
+    core::ir::ReferencedModuleVars<const Module> referenced_module_vars_;
 };
 
 Validator::Validator(const Module& mod, Capabilities capabilities)
-    : mod_(mod), capabilities_(capabilities) {}
+    : mod_(mod), capabilities_(capabilities), referenced_module_vars_(mod) {}
 
 Validator::~Validator() = default;
 
@@ -884,6 +925,11 @@ bool Validator::CheckResult(const Instruction* inst, size_t idx) {
         return false;
     }
 
+    if (DAWN_UNLIKELY(result->Instruction() == nullptr)) {
+        AddResultError(inst, idx) << "result instruction is undefined";
+        return false;
+    }
+
     return true;
 }
 
@@ -922,6 +968,28 @@ bool Validator::CheckOperand(const Instruction* inst, size_t idx) {
     // behaviour.
     if (DAWN_UNLIKELY(!operand->Is<ir::Function>() && operand->Type() == nullptr)) {
         AddError(inst, idx) << "operand type is undefined";
+        return false;
+    }
+
+    if (DAWN_UNLIKELY(!operand->Alive())) {
+        AddError(inst, idx) << "operand is not alive";
+        return false;
+    }
+
+    if (DAWN_UNLIKELY(!operand->HasUsage(inst, idx))) {
+        AddError(inst, idx) << "operand missing usage";
+        return false;
+    }
+
+    if (auto fn = operand->As<Function>(); fn && !all_functions_.Contains(fn)) {
+        AddError(inst, idx) << NameOf(operand) << " is not part of the module";
+        return false;
+    }
+
+    if (DAWN_UNLIKELY(!operand->Is<ir::Unused>() && !operand->Is<Constant>() &&
+                      !scope_stack_.Contains(operand))) {
+        AddError(inst, idx) << NameOf(operand) << " is not in scope";
+        AddDeclarationNote(operand);
         return false;
     }
 
@@ -992,13 +1060,6 @@ bool Validator::CheckResultsAndOperands(const ir::Instruction* inst,
     bool results_passed = CheckResults(inst, num_results);
     bool operands_passed = CheckOperands(inst, num_operands);
     return results_passed && operands_passed;
-}
-
-// TODO(353498500): Remove this function once it is no longer used.
-void Validator::CheckOperandNotNull(const Instruction* inst, const ir::Value* operand, size_t idx) {
-    if (operand == nullptr) {
-        AddError(inst, idx) << "operand is undefined";
-    }
 }
 
 void Validator::CheckType(const core::type::Type* root,
@@ -1142,12 +1203,71 @@ void Validator::CheckFunction(const Function* func) {
             param->Type(), [&]() -> diag::Diagnostic& { return AddError(param); },
             Capabilities{Capability::kAllowRefTypes});
 
+        if (!InvariantOnlyIfAlsoPosition(param->Attributes())) {
+            AddError(func)
+                << "invariant can only decorate a param iff it is also decorated with position";
+        }
+
+        if (!IsValidFunctionParamType(param->Type())) {
+            auto struct_ty = param->Type()->As<core::type::Struct>();
+            if (!capabilities_.Contains(Capability::kAllowPointersInStructures) || !struct_ty ||
+                struct_ty->Members().Any([](const core::type::StructMember* m) {
+                    return !IsValidFunctionParamType(m->Type());
+                })) {
+                AddError(param) << "function parameter type must be constructible, a pointer, a "
+                                   "texture, or a sampler";
+            }
+        }
+
+        if (auto* s = param->Type()->As<core::type::Struct>()) {
+            for (auto* mem : s->Members()) {
+                if (!InvariantOnlyIfAlsoPosition(mem->Attributes())) {
+                    AddError(func) << "invariant can only decorate a param member iff it is also "
+                                      "decorated with position";
+                }
+
+                if (HasLocationAndBuiltin(mem->Attributes())) {
+                    AddError(param)
+                        << "a builtin and location cannot be both declared for a struct member";
+                }
+            }
+        } else {
+            if (HasLocationAndBuiltin(param->Attributes())) {
+                AddError(param) << "a builtin and location cannot be both declared for a param";
+            }
+        }
+
         scope_stack_.Add(param);
     }
 
     if (func->Stage() == Function::PipelineStage::kCompute) {
         if (DAWN_UNLIKELY(!func->WorkgroupSize().has_value())) {
             AddError(func) << "compute entry point requires workgroup size attribute";
+        }
+
+        if (DAWN_UNLIKELY(func->ReturnType() && !func->ReturnType()->Is<core::type::Void>())) {
+            AddError(func) << "compute entry point must not have a return type";
+        }
+    } else if (auto* s = func->ReturnType()->As<core::type::Struct>()) {
+        for (auto* mem : s->Members()) {
+            if (HasLocationAndBuiltin(mem->Attributes())) {
+                AddError(func)
+                    << "a builtin and location cannot be both declared for a struct member";
+            } else if (func->Stage() != Function::PipelineStage::kUndefined &&
+                       !HasEitherLocationOrBuiltin(mem->Attributes())) {
+                AddError(func) << "members of struct used for returns of entry points must "
+                                  "have a builtin or location decoration";
+            }
+        }
+    } else {
+        if (HasLocationAndBuiltin(func->ReturnAttributes())) {
+            AddError(func)
+                << "a builtin and location cannot be both declared for a function return";
+        } else if (!func->ReturnType()->Is<core::type::Void>() &&
+                   func->Stage() != Function::PipelineStage::kUndefined &&
+                   !HasEitherLocationOrBuiltin(func->ReturnAttributes())) {
+            AddError(func) << "a non-void return for an entry point must have a builtin or "
+                              "location decoration";
         }
     }
 
@@ -1169,6 +1289,21 @@ void Validator::CheckFunction(const Function* func) {
         AddError(func) << "function return type must be constructible";
     }
 
+    const auto* ret_struct = func->ReturnType()->As<core::type::Struct>();
+    if (ret_struct) {
+        for (auto* mem : ret_struct->Members()) {
+            if (!InvariantOnlyIfAlsoPosition(mem->Attributes())) {
+                AddError(func) << "invariant can only decorate a member iff it is also decorated "
+                                  "with position";
+            }
+        }
+    } else {
+        if (!InvariantOnlyIfAlsoPosition(func->ReturnAttributes())) {
+            AddError(func)
+                << "invariant can only decorate a return iff it is also decorated with position";
+        }
+    }
+
     if (func->Stage() != Function::PipelineStage::kFragment) {
         if (DAWN_UNLIKELY(func->ReturnBuiltin().has_value() &&
                           func->ReturnBuiltin().value() == BuiltinValue::kFragDepth)) {
@@ -1176,8 +1311,115 @@ void Validator::CheckFunction(const Function* func) {
         }
     }
 
+    if (func->Stage() == Function::PipelineStage::kVertex) {
+        CheckVertexEntryPoint(func);
+    }
+
     QueueBlock(func->Block());
     ProcessTasks();
+}
+
+void Validator::CheckVertexEntryPoint(const Function* ep) {
+    const auto* ret_struct = ep->ReturnType()->As<core::type::Struct>();
+    bool contains_position = false;
+    if (ret_struct) {
+        for (auto* mem : ret_struct->Members()) {
+            if (!InvariantOnlyIfAlsoPosition(mem->Attributes())) {
+                AddError(ep) << "invariant can only decorate output members iff they are also "
+                                "position builtins";
+            }
+
+            if (!mem->Attributes().builtin.has_value()) {
+                continue;
+            }
+            switch (mem->Attributes().builtin.value()) {
+                case BuiltinValue::kPosition:
+                    contains_position = true;
+                    CheckBuiltinPosition(ep, mem->Type());
+                    break;
+                case BuiltinValue::kClipDistances:
+                    CheckBuiltinClipDistances(ep, mem->Type());
+                    break;
+                default:
+                    break;
+            }
+        }
+    } else {
+        if (!InvariantOnlyIfAlsoPosition(ep->ReturnAttributes())) {
+            AddError(ep)
+                << "invariant can only decorate outputs iff they are also position builtins";
+        }
+        if (ep->ReturnBuiltin() && ep->ReturnBuiltin() == BuiltinValue::kPosition) {
+            contains_position = true;
+            CheckBuiltinPosition(ep, ep->ReturnType());
+        }
+    }
+
+    for (auto var : referenced_module_vars_.TransitiveReferences(ep)) {
+        const auto* res_type = var->Result(0)->Type()->UnwrapPtrOrRef();
+        const auto* res_struct = res_type->As<core::type::Struct>();
+        if (res_struct) {
+            for (auto* mem : res_struct->Members()) {
+                if (!InvariantOnlyIfAlsoPosition(mem->Attributes())) {
+                    AddError(ep) << "invariant can only decorate members iff they are also "
+                                    "position builtins";
+                }
+
+                if (!mem->Attributes().builtin.has_value()) {
+                    continue;
+                }
+                switch (mem->Attributes().builtin.value()) {
+                    case BuiltinValue::kPosition:
+                        contains_position = true;
+                        CheckBuiltinPosition(ep, mem->Type()->UnwrapPtrOrRef());
+                        break;
+                    case BuiltinValue::kClipDistances:
+                        CheckBuiltinClipDistances(ep, mem->Type()->UnwrapPtrOrRef());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        } else {
+            if (!InvariantOnlyIfAlsoPosition(var->Attributes())) {
+                AddError(ep)
+                    << "invariant can only decorate vars iff they are also position builtins";
+            }
+
+            if (!var->Attributes().builtin.has_value()) {
+                continue;
+            }
+            switch (var->Attributes().builtin.value()) {
+                case BuiltinValue::kPosition: {
+                    contains_position = true;
+                    CheckBuiltinPosition(ep, res_type);
+                } break;
+                case BuiltinValue::kClipDistances:
+                    CheckBuiltinClipDistances(ep, var->Result(0)->Type()->UnwrapPtrOrRef());
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    if (DAWN_UNLIKELY(!contains_position)) {
+        AddError(ep) << "position must be declared for vertex entry point output";
+    }
+}
+
+void Validator::CheckBuiltinPosition(const Function* ep, const core::type::Type* type) {
+    auto elems = type->Elements();
+    if (!type->IsFloatVector() || !elems.type->Is<core::type::F32>() || elems.count != 4) {
+        AddError(ep) << "position must be a vec4<f32>";
+    }
+}
+
+void Validator::CheckBuiltinClipDistances(const Function* ep, const core::type::Type* type) {
+    const auto elems = type->Elements();
+    if (!elems.type || !elems.type->Is<core::type::F32>() || elems.count > 8) {
+        AddError(ep) << "clip_distances must be an array<f32, N>, where N <= 8";
+    }
 }
 
 void Validator::ProcessTasks() {
@@ -1257,23 +1499,13 @@ void Validator::CheckInstruction(const Instruction* inst) {
         AddError(inst) << "destroyed instruction found in instruction list";
         return;
     }
-    // TODO(353475590): Once all instruction types have been updated to using new checking code,
-    //                  remove the duplicate reporting of results being null, see
-    //                  Validator::CheckResults
+
     auto results = inst->Results();
     for (size_t i = 0; i < results.Length(); ++i) {
         auto* res = results[i];
         if (!res) {
-            AddResultError(inst, i) << "result is undefined";
             continue;
         }
-
-        if (res->Instruction() == nullptr) {
-            AddResultError(inst, i) << "instruction of result is undefined";
-        } else if (res->Instruction() != inst) {
-            AddResultError(inst, i) << "instruction of result is a different instruction";
-        }
-
         CheckType(res->Type(), [&]() -> diag::Diagnostic& { return AddResultError(inst, i); });
     }
 
@@ -1282,19 +1514,6 @@ void Validator::CheckInstruction(const Instruction* inst) {
         auto* op = ops[i];
         if (!op) {
             continue;
-        }
-
-        // Note, a `nullptr` is a valid operand in some cases, like `var` so we can't just check
-        // for `nullptr` here.
-        if (!op->Alive()) {
-            AddError(inst, i) << "operand is not alive";
-        } else if (!op->HasUsage(inst, i)) {
-            AddError(inst, i) << "operand missing usage";
-        } else if (auto fn = op->As<Function>(); fn && !all_functions_.Contains(fn)) {
-            AddError(inst, i) << NameOf(op) << " is not part of the module";
-        } else if (!op->Is<ir::Unused>() && !op->Is<Constant>() && !scope_stack_.Contains(op)) {
-            AddError(inst, i) << NameOf(op) << " is not in scope";
-            AddDeclarationNote(op);
         }
 
         CheckType(op->Type(), [&]() -> diag::Diagnostic& { return AddError(inst, i); });
@@ -1360,6 +1579,12 @@ void Validator::CheckVar(const Var* var) {
     // Check that only resource variables have @group and @binding set
     switch (mv->AddressSpace()) {
         case AddressSpace::kHandle:
+            if (!capabilities_.Contains(Capability::kAllowHandleVarsWithoutBindings)) {
+                if (!var->BindingPoint().has_value()) {
+                    AddError(var) << "resource variable missing binding points";
+                }
+            }
+            break;
         case AddressSpace::kStorage:
         case AddressSpace::kUniform:
             if (!var->BindingPoint().has_value()) {
@@ -1375,16 +1600,33 @@ void Validator::CheckVar(const Var* var) {
         AddError(var) << "'@input_attachment_index' is not valid for non-handle var";
         return;
     }
+
+    if (HasLocationAndBuiltin(var->Attributes())) {
+        AddError(var) << "a builtin and location cannot be both declared for a var";
+        return;
+    }
+
+    if (auto* s = var->Result(0)->Type()->UnwrapPtrOrRef()->As<core::type::Struct>()) {
+        for (auto* mem : s->Members()) {
+            if (HasLocationAndBuiltin(mem->Attributes())) {
+                AddError(var)
+                    << "a builtin and location cannot be both declared for a struct member";
+                return;
+            }
+        }
+    }
 }
 
-void Validator::CheckLet(const Let* let) {
-    CheckOperandNotNull(let, let->Value(), Let::kValueOperandOffset);
+void Validator::CheckLet(const Let* l) {
+    if (!CheckResultsAndOperands(l, Let::kNumResults, Let::kNumOperands)) {
+        return;
+    }
 
-    if (let->Result(0) && let->Value()) {
-        if (let->Result(0)->Type() != let->Value()->Type()) {
-            AddError(let) << "result type " << style::Type(let->Result(0)->Type()->FriendlyName())
-                          << " does not match value type "
-                          << style::Type(let->Value()->Type()->FriendlyName());
+    if (l->Result(0) && l->Value()) {
+        if (l->Result(0)->Type() != l->Value()->Type()) {
+            AddError(l) << "result type " << style::Type(l->Result(0)->Type()->FriendlyName())
+                        << " does not match value type "
+                        << style::Type(l->Value()->Type()->FriendlyName());
         }
     }
 }
@@ -1719,7 +1961,8 @@ void Validator::CheckUnary(const Unary* u) {
 }
 
 void Validator::CheckIf(const If* if_) {
-    CheckOperandNotNull(if_, if_->Condition(), If::kConditionOperandOffset);
+    CheckResults(if_);
+    CheckOperand(if_, If::kConditionOperandOffset);
 
     if (if_->Condition() && !if_->Condition()->Type()->Is<core::type::Bool>()) {
         AddError(if_, If::kConditionOperandOffset)
@@ -1789,7 +2032,8 @@ void Validator::CheckLoopContinuing(const Loop* loop) {
     // Ensure that values used in the loop continuing are not from the loop body, after a
     // continue instruction.
     if (auto* first_continue = first_continues_.GetOr(loop, nullptr)) {
-        // Find the instruction in the body block that is or holds the first continue instruction.
+        // Find the instruction in the body block that is or holds the first continue
+        // instruction.
         const Instruction* holds_continue = first_continue;
         while (holds_continue && holds_continue->Block() &&
                holds_continue->Block() != loop->Body()) {
@@ -1803,7 +2047,8 @@ void Validator::CheckLoopContinuing(const Loop* loop) {
                     if (TransitivelyHolds(loop->Continuing(), use.instruction)) {
                         AddError(use.instruction, use.operand_index)
                             << NameOf(result)
-                            << " cannot be used in continuing block as it is declared after the "
+                            << " cannot be used in continuing block as it is declared after "
+                               "the "
                                "first "
                             << style::Instruction("continue") << " in the loop's body";
                         AddDeclarationNote(result);
@@ -1817,7 +2062,7 @@ void Validator::CheckLoopContinuing(const Loop* loop) {
 }
 
 void Validator::CheckSwitch(const Switch* s) {
-    CheckOperandNotNull(s, s->Condition(), If::kConditionOperandOffset);
+    CheckOperand(s, Switch::kConditionOperandOffset);
 
     if (s->Condition() && !s->Condition()->Type()->IsIntegerScalar()) {
         AddError(s, Switch::kConditionOperandOffset) << "condition type must be an integer scalar";
@@ -1876,7 +2121,7 @@ void Validator::CheckTerminator(const Terminator* b) {
         [&](const ir::NextIteration* n) { CheckNextIteration(n); },  //
         [&](const ir::Return* ret) { CheckReturn(ret); },            //
         [&](const ir::TerminateInvocation*) {},                      //
-        [&](const ir::Unreachable*) {},                              //
+        [&](const ir::Unreachable* u) { CheckUnreachable(u); },      //
         [&](Default) { AddError(b) << "missing validation"; });
 
     if (b->next) {
@@ -1986,8 +2231,8 @@ void Validator::CheckReturn(const Return* ret) {
 
     auto* func = ret->Func();
     if (func == nullptr) {
-        // Func() returning nullptr after CheckResultsAndOperandRange is due to the first operand
-        // being not a function
+        // Func() returning nullptr after CheckResultsAndOperandRange is due to the first
+        // operand being not a function
         AddError(ret) << "expected function for first operand";
         return;
     }
@@ -2004,6 +2249,10 @@ void Validator::CheckReturn(const Return* ret) {
                           << " does not match function return type " << NameOf(func->ReturnType());
         }
     }
+}
+
+void Validator::CheckUnreachable(const Unreachable* u) {
+    CheckResultsAndOperands(u, Unreachable::kNumResults, Unreachable::kNumOperands);
 }
 
 void Validator::CheckControlsAllowingIf(const Exit* exit, const Instruction* control) {

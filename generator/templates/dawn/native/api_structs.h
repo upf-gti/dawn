@@ -24,7 +24,7 @@
 //* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 //* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 //* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-{% from 'dawn/cpp_macros.tmpl' import wgpu_string_constructors with context %}
+{% from 'dawn/cpp_macros.tmpl' import wgpu_string_members with context %}
 
 {% set namespace_name = Name(metadata.native_namespace) %}
 {% set DIR = namespace_name.concatcase().upper() %}
@@ -32,6 +32,7 @@
 #ifndef {{DIR}}_{{namespace.upper()}}_STRUCTS_H_
 #define {{DIR}}_{{namespace.upper()}}_STRUCTS_H_
 
+#include "absl/strings/string_view.h"
 {% set api = metadata.api.lower() %}
 {% set CAPI = metadata.c_prefix %}
 #include "dawn/{{api}}_cpp.h"
@@ -106,15 +107,20 @@ namespace {{native_namespace}} {
 
             //* Custom string constructors / conversion
             {% if type.name.get() == "string view" %}
-                {{wgpu_string_constructors(CppType, false) | indent(8)}}
+                {{wgpu_string_members(CppType) | indent(8)}}
 
+                #ifndef ABSL_USES_STD_STRING_VIEW
                 // NOLINTNEXTLINE(runtime/explicit) allow implicit conversion
-                operator std::string_view() const;
-            {% elif type.name.get() == "nullable string view" %}
-                {{wgpu_string_constructors(CppType, true) | indent(8)}}
-
-                // NOLINTNEXTLINE(runtime/explicit) allow implicit conversion
-                operator std::optional<std::string_view>() const;
+                operator absl::string_view() const {
+                    if (this->length == wgpu::kStrlen) {
+                        if (IsUndefined()) {
+                            return {};
+                        }
+                        return {this->data};
+                    }
+                    return {this->data, this->length};
+                }
+                #endif
             {% endif %}
 
             {% if type.any_member_requires_struct_defaulting %}

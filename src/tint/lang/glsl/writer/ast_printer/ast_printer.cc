@@ -1127,41 +1127,31 @@ void ASTPrinter::EmitCountOneBitsCall(StringStream& out, const ast::CallExpressi
 void ASTPrinter::EmitSelectCall(StringStream& out,
                                 const ast::CallExpression* expr,
                                 const sem::BuiltinFn* builtin) {
-    // GLSL does not support ternary expressions with a bool vector conditional,
-    // so polyfill with a helper.
-    if (auto* vec = builtin->Parameters()[2]->Type()->As<core::type::Vector>()) {
-        CallBuiltinHelper(out, expr, builtin,
-                          [&](TextBuffer* b, const std::vector<std::string>& params) {
-                              auto l = Line(b);
-                              l << "  return ";
-                              EmitType(l, builtin->ReturnType(), core::AddressSpace::kUndefined,
-                                       core::Access::kUndefined, "");
-                              {
-                                  ScopedParen sp(l);
-                                  for (uint32_t i = 0; i < vec->Width(); i++) {
-                                      if (i > 0) {
-                                          l << ", ";
-                                      }
-                                      l << params[2] << "[" << i << "] ? " << params[1] << "[" << i
-                                        << "] : " << params[0] << "[" << i << "]";
-                                  }
-                              }
-                              l << ";";
-                          });
-        return;
-    }
-
     auto* expr_false = expr->args[0];
     auto* expr_true = expr->args[1];
     auto* expr_cond = expr->args[2];
 
+    out << "mix";
     ScopedParen paren(out);
-    EmitExpression(out, expr_cond);
 
-    out << " ? ";
-    EmitExpression(out, expr_true);
-    out << " : ";
     EmitExpression(out, expr_false);
+    out << ", ";
+    EmitExpression(out, expr_true);
+    out << ", ";
+
+    auto* p0_ty = builtin->Parameters()[0]->Type();
+    auto* p2_ty = builtin->Parameters()[2]->Type();
+
+    // If the value types are vectors, but the condition is a single bool, splat the bool into a
+    // vector of equivalent size.
+    if (p0_ty->Is<core::type::Vector>() && !p2_ty->Is<core::type::Vector>()) {
+        auto* vec = p0_ty->As<core::type::Vector>();
+        out << "bvec" << vec->Width();
+        ScopedParen cast_paren(out);
+        EmitExpression(out, expr_cond);
+    } else {
+        EmitExpression(out, expr_cond);
+    }
 }
 
 void ASTPrinter::EmitDotCall(StringStream& out,
@@ -1322,9 +1312,9 @@ void ASTPrinter::EmitBarrierCall(StringStream& out, const sem::BuiltinFn* builti
     if (builtin->Fn() == wgsl::BuiltinFn::kWorkgroupBarrier) {
         out << "barrier()";
     } else if (builtin->Fn() == wgsl::BuiltinFn::kStorageBarrier) {
-        out << "{ barrier(); memoryBarrierBuffer(); }";
+        out << "{ memoryBarrierBuffer(); barrier(); }";
     } else if (builtin->Fn() == wgsl::BuiltinFn::kTextureBarrier) {
-        out << "{ barrier(); memoryBarrierImage(); }";
+        out << "{ memoryBarrierImage(); barrier(); }";
     } else {
         TINT_UNREACHABLE() << "unexpected barrier builtin type " << builtin->Fn();
     }
@@ -1490,6 +1480,7 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
     uint32_t glsl_ret_width = 4u;
     bool append_depth_ref_to_coords = true;
     bool is_depth = texture_type->Is<core::type::DepthTexture>();
+    bool is_array = IsTextureArray(texture_type->Dim());
 
     switch (builtin->Fn()) {
         case wgsl::BuiltinFn::kTextureSample:
@@ -1532,7 +1523,14 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
             TINT_ICE() << "Unhandled texture builtin '" << std::string(builtin->str()) << "'";
     }
 
+    bool supplyDerivativesAsGradients = false;
     if (builtin->Signature().IndexOf(core::ParameterUsage::kOffset) >= 0) {
+        if ((builtin->Fn() == wgsl::BuiltinFn::kTextureSample ||
+             builtin->Fn() == wgsl::BuiltinFn::kTextureSampleCompare) &&
+            is_depth && is_array) {
+            out << "Grad";
+            supplyDerivativesAsGradients = true;
+        }
         out << "Offset";
     }
 
@@ -1570,6 +1568,14 @@ void ASTPrinter::EmitTextureCall(StringStream& out,
 
     emit_expr_as_signed(param_coords);
 
+    if (supplyDerivativesAsGradients) {
+        auto* coords = arg(Usage::kCoords);
+        out << ", dFdx(";
+        EmitExpression(out, coords);
+        out << "), dFdy(";
+        EmitExpression(out, coords);
+        out << ")";
+    }
     for (auto usage : {Usage::kLevel, Usage::kDdx, Usage::kDdy, Usage::kSampleIndex}) {
         if (auto* e = arg(usage)) {
             out << ", ";
@@ -2743,23 +2749,26 @@ void ASTPrinter::EmitType(StringStream& out,
                     out << "writeonly ";
                     break;
                 case core::Access::kReadWrite: {
-                    // ESSL 3.1 SPEC (chapter 4.9, Memory Access Qualifiers):
-                    // Except for image variables qualified with the format qualifiers r32f, r32i,
-                    // and r32ui, image variables must specify either memory qualifier readonly or
-                    // the memory qualifier writeonly.
-                    switch (storage->TexelFormat()) {
-                        case core::TexelFormat::kR32Float:
-                        case core::TexelFormat::kR32Sint:
-                        case core::TexelFormat::kR32Uint:
-                            break;
-                        default: {
-                            // TODO(dawn:1972): Fix the tests that contain read-write storage
-                            // textures with illegal formats.
-                            out << "writeonly ";
-                            break;
+                    if (version_.IsES()) {
+                        // ESSL 3.1 SPEC (chapter 4.9, Memory Access Qualifiers):
+                        // Except for image variables qualified with the format qualifiers r32f,
+                        // r32i, and r32ui, image variables must specify either memory qualifier
+                        // readonly or the memory qualifier writeonly.
+                        switch (storage->TexelFormat()) {
+                            case core::TexelFormat::kR32Float:
+                            case core::TexelFormat::kR32Sint:
+                            case core::TexelFormat::kR32Uint:
+                                break;
+                            default: {
+                                // TODO(dawn:1972): Fix the tests that contain read-write storage
+                                // textures with illegal formats.
+                                out << "writeonly ";
+                                break;
+                            }
                         }
                     }
-                } break;
+                    break;
+                }
                 default:
                     TINT_UNREACHABLE() << "unexpected storage texture access " << storage->Access();
             }

@@ -101,14 +101,27 @@ interop::Interface<interop::GPUSupportedFeatures> GPUAdapter::getFeatures(Napi::
 interop::Interface<interop::GPUSupportedLimits> GPUAdapter::getLimits(Napi::Env env) {
     wgpu::SupportedLimits limits{};
     wgpu::DawnExperimentalSubgroupLimits subgroupLimits{};
+    wgpu::DawnExperimentalImmediateDataLimits immediateDataLimits{};
 
     wgpu::Adapter wgpuAdapter = adapter_.Get();
 
+    auto InsertInChain = [&](wgpu::ChainedStructOut* node) {
+        node->nextInChain = limits.nextInChain;
+        limits.nextInChain = node;
+    };
+
+    wgpu::ChainedStructOut** limitsListTail = &limits.nextInChain;
     // Query the subgroup limits only if subgroups feature is available on the adapter.
     // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
     if (wgpuAdapter.HasFeature(FeatureName::Subgroups) ||
         wgpuAdapter.HasFeature(FeatureName::ChromiumExperimentalSubgroups)) {
-        limits.nextInChain = &subgroupLimits;
+        InsertInChain(&subgroupLimits);
+    }
+
+    // Query the immediate data limits only if ChromiumExperimentalImmediateData feature
+    // is available on adapter.
+    if (wgpuAdapter.HasFeature(FeatureName::ChromiumExperimentalImmediateData)) {
+        InsertInChain(&immediateDataLimits);
     }
 
     if (!wgpuAdapter.GetLimits(&limits)) {
@@ -196,18 +209,21 @@ interop::Promise<interop::Interface<interop::GPUDevice>> GPUAdapter::requestDevi
     interop::Promise<interop::Interface<interop::GPUDevice>> promise(env, PROMISE_INFO);
 
     wgpu::RequiredLimits limits;
-#define COPY_LIMIT(LIMIT)                                                                    \
-    if (descriptor.requiredLimits.count(#LIMIT)) {                                           \
-        using DawnLimitType = decltype(WGPULimits::LIMIT);                                   \
-        DawnLimitType* dawnLimit = &limits.limits.LIMIT;                                     \
-        uint64_t jsLimit = descriptor.requiredLimits[#LIMIT];                                \
-        if (jsLimit > std::numeric_limits<DawnLimitType>::max() - 1) {                       \
-            promise.Reject(                                                                  \
-                binding::Errors::OperationError(env, "Limit \"" #LIMIT "\" out of range.")); \
-            return promise;                                                                  \
-        }                                                                                    \
-        *dawnLimit = jsLimit;                                                                \
-        descriptor.requiredLimits.erase(#LIMIT);                                             \
+#define COPY_LIMIT(LIMIT)                                                                        \
+    if (descriptor.requiredLimits.count(#LIMIT)) {                                               \
+        auto jsLimitVariant = descriptor.requiredLimits[#LIMIT];                                 \
+        if (!std::holds_alternative<interop::UndefinedType>(jsLimitVariant)) {                   \
+            using DawnLimitType = decltype(WGPULimits::LIMIT);                                   \
+            DawnLimitType* dawnLimit = &limits.limits.LIMIT;                                     \
+            uint64_t jsLimit = std::get<interop::GPUSize64>(jsLimitVariant);                     \
+            if (jsLimit > std::numeric_limits<DawnLimitType>::max() - 1) {                       \
+                promise.Reject(                                                                  \
+                    binding::Errors::OperationError(env, "Limit \"" #LIMIT "\" out of range.")); \
+                return promise;                                                                  \
+            }                                                                                    \
+            *dawnLimit = jsLimit;                                                                \
+        }                                                                                        \
+        descriptor.requiredLimits.erase(#LIMIT);                                                 \
     }
     FOR_EACH_LIMIT(COPY_LIMIT)
 #undef COPY_LIMIT

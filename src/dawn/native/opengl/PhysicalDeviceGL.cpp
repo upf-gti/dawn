@@ -95,6 +95,10 @@ bool IsANGLEDesktopGL(std::string renderer) {
            renderer.find("OpenGL ES") == std::string::npos;
 }
 
+bool IsSwiftShader(std::string renderer) {
+    return renderer.find("SwiftShader") != std::string::npos;
+}
+
 }  // anonymous namespace
 
 // static
@@ -332,7 +336,7 @@ MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits)
     // TODO(dawn:685, dawn:1448): Support higher values as ANGLE compiler always generates
     // additional shader varyings (gl_PointSize and dx_Position) on ANGLE D3D backends.
     limits->v1.maxInterStageShaderComponents =
-        std::min(limits->v1.maxInterStageShaderComponents, kMaxInterStageShaderComponents);
+        std::min(limits->v1.maxInterStageShaderComponents, kMaxInterStageShaderVariables * 4);
     limits->v1.maxInterStageShaderVariables =
         std::min(limits->v1.maxInterStageShaderVariables, kMaxInterStageShaderVariables);
 
@@ -415,6 +419,11 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
 
     // Use T2B and B2T copies to emulate a T2T copy between sRGB and non-sRGB textures.
     deviceToggles->Default(Toggle::UseT2B2TForSRGBTextureCopy, true);
+
+    // Scale depth bias value by * 0.5 on certain GL drivers.
+    deviceToggles->Default(Toggle::GLDepthBiasModifier, gl.GetVersion().IsDesktop() ||
+                                                            IsANGLEDesktopGL(mName) ||
+                                                            IsSwiftShader(mName));
 }
 
 ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
@@ -477,6 +486,6 @@ FeatureValidationResult PhysicalDevice::ValidateFeatureSupportedWithTogglesImpl(
     return {};
 }
 
-void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterProperties>& properties) const {}
+void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterInfo>& info) const {}
 
 }  // namespace dawn::native::opengl

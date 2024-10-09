@@ -143,7 +143,7 @@ GPUDevice::GPUDevice(Napi::Env env,
       device_(device),
       async_(async),
       lost_promise_(lost_promise),
-      label_(desc.label ? desc.label : "") {
+      label_(CopyLabel(desc.label)) {
     device_.SetLoggingCallback(
         [](WGPULoggingType type, char const* message, void* userdata) {
             printf("%s:\n", str(type));
@@ -185,12 +185,24 @@ interop::Interface<interop::GPUSupportedFeatures> GPUDevice::getFeatures(Napi::E
 interop::Interface<interop::GPUSupportedLimits> GPUDevice::getLimits(Napi::Env env) {
     wgpu::SupportedLimits limits{};
     wgpu::DawnExperimentalSubgroupLimits subgroupLimits{};
+    wgpu::DawnExperimentalImmediateDataLimits immediateDataLimits{};
+
+    auto InsertInChain = [&](wgpu::ChainedStructOut* node) {
+        node->nextInChain = limits.nextInChain;
+        limits.nextInChain = node;
+    };
 
     // Query the subgroup limits only if subgroups feature is enabled on the device.
     // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
     if (device_.HasFeature(wgpu::FeatureName::Subgroups) ||
         device_.HasFeature(wgpu::FeatureName::ChromiumExperimentalSubgroups)) {
-        limits.nextInChain = &subgroupLimits;
+        InsertInChain(&subgroupLimits);
+    }
+
+    // Query the immediate data limits only if ChromiumExperimentalImmediateData feature
+    // is available on device.
+    if (device_.HasFeature(FeatureName::ChromiumExperimentalImmediateData)) {
+        InsertInChain(&subgroupLimits);
     }
 
     if (!device_.GetLimits(&limits)) {
@@ -334,7 +346,7 @@ interop::Interface<interop::GPUShaderModule> GPUDevice::createShaderModule(
     interop::GPUShaderModuleDescriptor descriptor) {
     Converter conv(env);
 
-    wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
+    wgpu::ShaderSourceWGSL wgsl_desc{};
     wgpu::ShaderModuleDescriptor sm_desc{};
     if (!conv(wgsl_desc.code, descriptor.code) || !conv(sm_desc.label, descriptor.label)) {
         return {};
@@ -399,7 +411,7 @@ GPUDevice::createComputePipelineAsync(Napi::Env env,
 
     device_.CreateComputePipelineAsync(
         &desc, wgpu::CallbackMode::AllowProcessEvents,
-        [ctx = std::move(ctx), label = std::string(desc.label ? desc.label : "")](
+        [ctx = std::move(ctx), label = CopyLabel(desc.label)](
             wgpu::CreatePipelineAsyncStatus status, wgpu::ComputePipeline pipeline, char const*) {
             switch (status) {
                 case wgpu::CreatePipelineAsyncStatus::Success:
@@ -431,7 +443,7 @@ GPUDevice::createRenderPipelineAsync(Napi::Env env,
 
     device_.CreateRenderPipelineAsync(
         &desc, wgpu::CallbackMode::AllowProcessEvents,
-        [ctx = std::move(ctx), label = std::string(desc.label ? desc.label : "")](
+        [ctx = std::move(ctx), label = CopyLabel(desc.label)](
             wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline, char const*) {
             switch (status) {
                 case wgpu::CreatePipelineAsyncStatus::Success:
@@ -570,7 +582,7 @@ std::string GPUDevice::getLabel(Napi::Env) {
 }
 
 void GPUDevice::setLabel(Napi::Env, std::string value) {
-    device_.SetLabel(value.c_str());
+    device_.SetLabel(std::string_view(value));
     label_ = value;
 }
 

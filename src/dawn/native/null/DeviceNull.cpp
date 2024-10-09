@@ -92,6 +92,7 @@ MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits)
     // Set the subgroups limit, as DeviceNull should support subgroups feature.
     limits->experimentalSubgroupLimits.minSubgroupSize = 4;
     limits->experimentalSubgroupLimits.maxSubgroupSize = 128;
+    limits->experimentalImmediateDataLimits.maxImmediateDataRangeByteSize = 16;
     return {};
 }
 
@@ -109,8 +110,8 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
     return Device::Create(adapter, descriptor, deviceToggles, std::move(lostEvent));
 }
 
-void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterProperties>& properties) const {
-    if (auto* memoryHeapProperties = properties.Get<AdapterPropertiesMemoryHeaps>()) {
+void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterInfo>& info) const {
+    if (auto* memoryHeapProperties = info.Get<AdapterPropertiesMemoryHeaps>()) {
         auto* heapInfo = new MemoryHeapInfo[1];
         memoryHeapProperties->heapCount = 1;
         memoryHeapProperties->heapInfo = heapInfo;
@@ -119,7 +120,7 @@ void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterProperties>& p
         heapInfo[0].properties = wgpu::HeapProperty::DeviceLocal | wgpu::HeapProperty::HostVisible |
                                  wgpu::HeapProperty::HostCached;
     }
-    if (auto* d3dProperties = properties.Get<AdapterPropertiesD3D>()) {
+    if (auto* d3dProperties = info.Get<AdapterPropertiesD3D>()) {
         d3dProperties->shaderModel = 0;
     }
 }

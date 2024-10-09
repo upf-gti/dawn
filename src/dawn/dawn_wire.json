@@ -207,19 +207,20 @@
     "special items": {
         "client_side_structures": [
             "FutureWaitInfo",
-            "SurfaceDescriptorFromMetalLayer",
-            "SurfaceDescriptorFromWindowsHWND",
-            "SurfaceDescriptorFromXlibWindow",
             "SurfaceDescriptorFromWindowsCoreWindow",
             "SurfaceDescriptorFromWindowsSwapChainPanel",
-            "SurfaceDescriptorFromAndroidNativeWindow"
+            "SurfaceSourceMetalLayer",
+            "SurfaceSourceWindowsHWND",
+            "SurfaceSourceXlibWindow",
+            "SurfaceSourceWaylandSurface",
+            "SurfaceSourceAndroidNativeWindow",
+            "SurfaceSourceXCBWindow"
         ],
         "client_side_commands": [
             "AdapterCreateDevice",
             "AdapterGetFormatCapabilities",
             "AdapterGetInfo",
             "AdapterGetInstance",
-            "AdapterGetProperties",
             "AdapterGetLimits",
             "AdapterHasFeature",
             "AdapterEnumerateFeatures",
@@ -291,8 +292,7 @@
             "InstanceProcessEvents",
             "InstanceWaitAny",
             "SurfaceConfigure",
-            "SurfaceUnconfigure",
-            "SwapChainGetCurrentTexture"
+            "SurfaceUnconfigure"
         ],
         "client_special_objects": [
             "Adapter",
@@ -304,7 +304,6 @@
             "ShaderModule",
             "Surface",
             "SurfaceCapabilities",
-            "SwapChain",
             "Texture"
         ],
         "server_custom_pre_handler_commands": [

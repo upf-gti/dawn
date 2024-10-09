@@ -29,6 +29,7 @@
 #define SRC_DAWN_NATIVE_COMMANDENCODER_H_
 
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "dawn/common/NonMovable.h"
@@ -54,12 +55,13 @@ class CommandEncoder final : public ApiObjectBase {
   public:
     static Ref<CommandEncoder> Create(DeviceBase* device,
                                       const UnpackedPtr<CommandEncoderDescriptor>& descriptor);
-    static Ref<CommandEncoder> MakeError(DeviceBase* device, const char* label);
+    static Ref<CommandEncoder> MakeError(DeviceBase* device, StringView label);
 
     ObjectType GetType() const override;
 
     CommandIterator AcquireCommands();
     CommandBufferResourceUsage AcquireResourceUsages();
+    std::vector<IndirectDrawMetadata> AcquireIndirectDrawMetadata();
 
     void TrackUsedQuerySet(QuerySetBase* querySet);
     void TrackQueryAvailability(QuerySetBase* querySet, uint32_t queryIndex);
@@ -91,12 +93,12 @@ class CommandEncoder final : public ApiObjectBase {
 
     // TODO(crbug.com/42241188): Remove const char* version of the methods.
     void APIInjectValidationError(const char* message) { APIInjectValidationError2(message); }
-    void APIInjectValidationError2(std::string_view message);
+    void APIInjectValidationError2(StringView message);
     void APIInsertDebugMarker(const char* groupLabel) { APIInsertDebugMarker2(groupLabel); }
-    void APIInsertDebugMarker2(std::string_view groupLabel);
+    void APIInsertDebugMarker2(StringView groupLabel);
     void APIPopDebugGroup();
     void APIPushDebugGroup(const char* groupLabel) { APIPushDebugGroup2(groupLabel); }
-    void APIPushDebugGroup2(std::string_view groupLabel);
+    void APIPushDebugGroup2(StringView groupLabel);
 
     void APIResolveQuerySet(QuerySetBase* querySet,
                             uint32_t firstQuery,
@@ -136,7 +138,7 @@ class CommandEncoder final : public ApiObjectBase {
 
   private:
     CommandEncoder(DeviceBase* device, const UnpackedPtr<CommandEncoderDescriptor>& descriptor);
-    CommandEncoder(DeviceBase* device, ObjectBase::ErrorTag tag, const char* label);
+    CommandEncoder(DeviceBase* device, ObjectBase::ErrorTag tag, StringView label);
 
     void DestroyImpl() override;
 

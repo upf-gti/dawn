@@ -226,10 +226,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
         const ShaderModuleDescriptor* descriptor,
         const std::vector<tint::wgsl::Extension>& internalExtensions = {},
         std::unique_ptr<OwnedCompilationMessages>* compilationMessages = nullptr);
-    // Deprecated: this was the way to create a SwapChain when it was explicitly manipulated by the
-    // end user.
-    ResultOrError<Ref<SwapChainBase>> CreateSwapChain(Surface* surface,
-                                                      const SwapChainDescriptor* descriptor);
     ResultOrError<Ref<SwapChainBase>> CreateSwapChain(Surface* surface,
                                                       SwapChainBase* previousSwapChain,
                                                       const SurfaceConfiguration* config);
@@ -237,8 +233,6 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
     ResultOrError<Ref<TextureViewBase>> CreateTextureView(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor = nullptr);
-
-    ResultOrError<wgpu::TextureUsage> GetSupportedSurfaceUsage(const Surface* surface) const;
 
     // Implementation of API object creation methods. DO NOT use them in a reentrant manner.
     BindGroupBase* APICreateBindGroup(const BindGroupDescriptor* descriptor);
@@ -281,12 +275,8 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
         return APICreateErrorShaderModule2(descriptor, errorMessage);
     }
     ShaderModuleBase* APICreateErrorShaderModule2(const ShaderModuleDescriptor* descriptor,
-                                                  std::string_view errorMessage);
-    // TODO(crbug.com/dawn/2320): Remove after deprecation.
-    SwapChainBase* APICreateSwapChain(Surface* surface, const SwapChainDescriptor* descriptor);
+                                                  StringView errorMessage);
     TextureBase* APICreateTexture(const TextureDescriptor* descriptor);
-
-    wgpu::TextureUsage APIGetSupportedSurfaceUsage(Surface* surface);
 
     InternalPipelineStore* GetInternalPipelineStore();
 
@@ -307,7 +297,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
         // TODO(crbug.com/42241188): Remove const char* version of the method.
         APIInjectError2(type, message);
     }
-    void APIInjectError2(wgpu::ErrorType type, std::string_view message);
+    void APIInjectError2(wgpu::ErrorType type, StringView message);
     bool APITick();
     void APIValidateTextureDescriptor(const TextureDescriptor* desc);
 
@@ -381,7 +371,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
         // TODO(crbug.com/42241188): Remove const char* version of the method.
         return APIForceLoss2(reason, message);
     }
-    void APIForceLoss2(wgpu::DeviceLostReason reason, std::string_view message);
+    void APIForceLoss2(wgpu::DeviceLostReason reason, StringView message);
     QueueBase* GetQueue() const;
 
     friend class IgnoreLazyClearCountScope;
@@ -403,6 +393,8 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
 
     virtual bool ShouldDuplicateParametersForDrawIndirect(
         const RenderPipelineBase* renderPipelineBase) const;
+
+    virtual bool BackendWillValidateMultiDraw() const;
 
     // For OpenGL/OpenGL ES, we must apply the index buffer offset from SetIndexBuffer to the
     // firstIndex parameter in indirect buffers. This happens in the validation since it
@@ -431,7 +423,7 @@ class DeviceBase : public ErrorSink, public RefCountedWithExternalCount<RefCount
     const std::string& GetLabel() const;
     // TODO(crbug.com/42241188): Remove const char* version of the method.
     void APISetLabel(const char* label);
-    void APISetLabel2(std::optional<std::string_view> label);
+    void APISetLabel2(StringView label);
     void APIDestroy();
 
     virtual void AppendDebugLayerMessages(ErrorData* error) {}

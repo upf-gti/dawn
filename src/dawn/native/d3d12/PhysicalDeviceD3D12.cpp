@@ -133,7 +133,6 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::IndirectFirstInstance);
     EnableFeature(Feature::RG11B10UfloatRenderable);
     EnableFeature(Feature::DepthClipControl);
-    EnableFeature(Feature::SurfaceCapabilities);
     EnableFeature(Feature::Float32Filterable);
     EnableFeature(Feature::DualSourceBlending);
     EnableFeature(Feature::Unorm16TextureFormats);
@@ -726,6 +725,12 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
         }
     }
 
+    // B2T copy failed with stencil8 format on Intel ACM/MTL/ARL GPUs. See
+    // https://issues.chromium.org/issues/368085621 for more information.
+    if (gpu_info::IsAlchemist(deviceId) || gpu_info::IsMeteorlakeOrArrowlake(deviceId)) {
+        deviceToggles->Default(Toggle::UseBlitForBufferToStencilTextureCopy, true);
+    }
+
     // Currently these workarounds are needed on Intel Gen9.5 and Gen11 GPUs, as well as
     // AMD GPUS.
     // See http://crbug.com/1237175, http://crbug.com/dawn/1628, and http://crbug.com/dawn/2032
@@ -814,8 +819,8 @@ MaybeError PhysicalDevice::ResetInternalDeviceForTestingImpl() {
     return {};
 }
 
-void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterProperties>& properties) const {
-    if (auto* memoryHeapProperties = properties.Get<AdapterPropertiesMemoryHeaps>()) {
+void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterInfo>& info) const {
+    if (auto* memoryHeapProperties = info.Get<AdapterPropertiesMemoryHeaps>()) {
         // https://microsoft.github.io/DirectX-Specs/d3d/D3D12GPUUploadHeaps.html describes
         // the properties of D3D12 Default/Upload/Readback heaps.
         if (mDeviceInfo.isUMA) {
@@ -849,7 +854,7 @@ void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterProperties>& p
                 wgpu::HeapProperty::HostUncached | wgpu::HeapProperty::HostCached;
         }
     }
-    if (auto* d3dProperties = properties.Get<AdapterPropertiesD3D>()) {
+    if (auto* d3dProperties = info.Get<AdapterPropertiesD3D>()) {
         // Report highest supported shader model version, instead of actual applied version.
         d3dProperties->shaderModel = GetDeviceInfo().highestSupportedShaderModel;
     }

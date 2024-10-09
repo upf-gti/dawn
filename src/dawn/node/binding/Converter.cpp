@@ -1499,8 +1499,13 @@ bool Converter::Convert(wgpu::FeatureName& out, interop::GPUFeatureName in) {
         case interop::GPUFeatureName::kChromiumExperimentalSubgroupUniformControlFlow:
             out = wgpu::FeatureName::ChromiumExperimentalSubgroupUniformControlFlow;
             return true;
-        case interop::GPUFeatureName::kTextureCompressionBcSliced3D:
+        case interop::GPUFeatureName::kChromiumExperimentalImmediateData:
+            out = wgpu::FeatureName::ChromiumExperimentalImmediateData;
+            return true;
         case interop::GPUFeatureName::kClipDistances:
+            out = wgpu::FeatureName::ClipDistances;
+            return true;
+        case interop::GPUFeatureName::kTextureCompressionBcSliced3D:
             return false;
     }
     return false;
@@ -1532,6 +1537,7 @@ bool Converter::Convert(interop::GPUFeatureName& out, wgpu::FeatureName in) {
         CASE(MultiDrawIndirect, kMultiDrawIndirect);
         CASE(DualSourceBlending, kDualSourceBlending);
         CASE(ClipDistances, kClipDistances);
+        CASE(ChromiumExperimentalImmediateData, kChromiumExperimentalImmediateData);
 
 #undef CASE
 
@@ -1582,7 +1588,6 @@ bool Converter::Convert(interop::GPUFeatureName& out, wgpu::FeatureName in) {
         case wgpu::FeatureName::SharedTextureMemoryVkDedicatedAllocation:
         case wgpu::FeatureName::SharedTextureMemoryZirconHandle:
         case wgpu::FeatureName::StaticSamplers:
-        case wgpu::FeatureName::SurfaceCapabilities:
         case wgpu::FeatureName::TransientAttachments:
         case wgpu::FeatureName::YCbCrVulkanSamplers:
         case wgpu::FeatureName::DawnLoadResolveTexture:
@@ -1758,6 +1763,14 @@ bool Converter::Throw(std::string&& message) {
 bool Converter::Throw(Napi::Error&& error) {
     error.ThrowAsJavaScriptException();
     return false;
+}
+
+std::string CopyLabel(StringView label) {
+    if (label.data == nullptr) {
+        return {};
+    }
+    size_t length = label.length == WGPU_STRLEN ? std::strlen(label.data) : label.length;
+    return {label.data, length};
 }
 
 }  // namespace wgpu::binding

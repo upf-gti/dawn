@@ -711,9 +711,15 @@ func (j job) run(cfg runConfig) {
 
 		expected = strings.ReplaceAll(expected, "\r\n", "\n")
 
+		outputFormat := strings.Split(string(j.format), "-")[0] // 'hlsl-fxc-ir' -> 'hlsl', etc.
+		if j.format == hlslFXC || j.format == hlslFXCIR {
+			// Emit HLSL specifically for FXC
+			outputFormat += "-fxc"
+		}
+
 		args := []string{
 			j.file,
-			"--format", strings.Split(string(j.format), "-")[0], // 'hlsl-fxc' -> 'hlsl', etc.
+			"--format", outputFormat,
 			"--print-hash",
 		}
 
@@ -737,20 +743,17 @@ func (j job) run(cfg runConfig) {
 		case spvasm, glsl, glslIR:
 			args = append(args, "--validate") // spirv-val and glslang are statically linked, always available
 			validate = true
-		case hlslDXC:
-		case hlslDXCIR:
+		case hlslDXC, hlslDXCIR:
 			if cfg.dxcPath != "" {
 				args = append(args, "--dxc", cfg.dxcPath)
 				validate = true
 			}
-		case hlslFXC:
-		case hlslFXCIR:
+		case hlslFXC, hlslFXCIR:
 			if cfg.fxcPath != "" {
 				args = append(args, "--fxc", cfg.fxcPath)
 				validate = true
 			}
-		case msl:
-		case mslIR:
+		case msl, mslIR:
 			if cfg.xcrunPath != "" {
 				args = append(args, "--xcrun", cfg.xcrunPath)
 				validate = true

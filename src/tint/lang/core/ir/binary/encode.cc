@@ -397,6 +397,21 @@ struct Encoder {
                 [&](const core::type::InputAttachment* i) {
                     TypeInputAttachment(*type_out.mutable_input_attachment(), i);
                 },
+                [&](const core::type::SubgroupMatrix* s) {
+                    switch (s->Kind()) {
+                        case core::SubgroupMatrixKind::kLeft:
+                            TypeSubgroupMatrix(*type_out.mutable_subgroup_matrix_left(), s);
+                            break;
+                        case core::SubgroupMatrixKind::kRight:
+                            TypeSubgroupMatrix(*type_out.mutable_subgroup_matrix_right(), s);
+                            break;
+                        case core::SubgroupMatrixKind::kResult:
+                            TypeSubgroupMatrix(*type_out.mutable_subgroup_matrix_result(), s);
+                            break;
+                        default:
+                            TINT_ICE() << "invalid subgroup matrix kind: " << ToString(s->Kind());
+                    }
+                },
                 TINT_ICE_ON_NO_MATCH);
 
             mod_out_.mutable_types()->Add(std::move(type_out));
@@ -504,6 +519,13 @@ struct Encoder {
 
     void TypeSampler(pb::TypeSampler& sampler_out, const core::type::Sampler* sampler_in) {
         sampler_out.set_kind(SamplerKind(sampler_in->Kind()));
+    }
+
+    void TypeSubgroupMatrix(pb::TypeSubgroupMatrix& subgroup_matrix_out,
+                            const core::type::SubgroupMatrix* subgroup_matrix_in) {
+        subgroup_matrix_out.set_sub_type(Type(subgroup_matrix_in->Type()));
+        subgroup_matrix_out.set_columns(subgroup_matrix_in->Columns());
+        subgroup_matrix_out.set_rows(subgroup_matrix_in->Rows());
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -1157,10 +1179,14 @@ struct Encoder {
                 return pb::BuiltinFn::input_attachment_load;
             case core::BuiltinFn::kSubgroupAdd:
                 return pb::BuiltinFn::subgroup_add;
+            case core::BuiltinFn::kSubgroupInclusiveAdd:
+                return pb::BuiltinFn::subgroup_inclusive_add;
             case core::BuiltinFn::kSubgroupExclusiveAdd:
                 return pb::BuiltinFn::subgroup_exclusive_add;
             case core::BuiltinFn::kSubgroupMul:
                 return pb::BuiltinFn::subgroup_mul;
+            case core::BuiltinFn::kSubgroupInclusiveMul:
+                return pb::BuiltinFn::subgroup_inclusive_mul;
             case core::BuiltinFn::kSubgroupExclusiveMul:
                 return pb::BuiltinFn::subgroup_exclusive_mul;
             case core::BuiltinFn::kSubgroupAnd:

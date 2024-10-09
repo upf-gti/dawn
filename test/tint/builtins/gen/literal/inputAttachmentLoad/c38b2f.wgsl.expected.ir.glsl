@@ -1,6 +1,6 @@
-SKIP: FAILED
+SKIP: INVALID
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:350 internal compiler error: Switch() matched no cases. Type: tint::core::type::InputAttachment
+<dawn>/src/tint/lang/glsl/writer/raise/texture_polyfill.cc:262 internal compiler error: TINT_UNREACHABLE unhandled texture function: inputAttachmentLoad
 ********************************************************************
 *  The tint shader compiler has encountered an unexpected error.   *
 *                                                                  *
@@ -8,4 +8,4 @@ SKIP: FAILED
 *  crbug.com/tint with the source program that triggered the bug.  *
 ********************************************************************
 
-tint executable returned error: signal: illegal instruction
+tint executable returned error: signal: trace/BPT trap

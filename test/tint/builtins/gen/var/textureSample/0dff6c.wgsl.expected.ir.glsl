@@ -1,11 +1,17 @@
-SKIP: FAILED
+#version 310 es
+precision highp float;
+precision highp int;
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:350 internal compiler error: Switch() matched no cases. Type: tint::core::type::DepthTexture
-********************************************************************
-*  The tint shader compiler has encountered an unexpected error.   *
-*                                                                  *
-*  Please help us fix this issue by submitting a bug report at     *
-*  crbug.com/tint with the source program that triggered the bug.  *
-********************************************************************
-
-tint executable returned error: signal: illegal instruction
+layout(binding = 0, std430)
+buffer tint_symbol_1_1_ssbo {
+  float tint_symbol;
+} v;
+uniform highp sampler2DShadow arg_0_arg_1;
+float textureSample_0dff6c() {
+  vec2 arg_2 = vec2(1.0f);
+  float res = textureOffset(arg_0_arg_1, vec3(arg_2, 0.0f), ivec2(1));
+  return res;
+}
+void main() {
+  v.tint_symbol = textureSample_0dff6c();
+}

@@ -1,31 +1,309 @@
-SKIP: FAILED
+#version 310 es
 
-<dawn>/src/tint/lang/glsl/writer/printer/printer.cc:509:16: runtime error: member call on null pointer of type 'tint::core::constant::Value'
-SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:509:16 in 
-AddressSanitizer:DEADLYSIGNAL
-=================================================================
-==1757716==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x55876fadd4d3 bp 0x7ffeddef5980 sp 0x7ffeddef57a0 T0)
-==1757716==The signal is caused by a READ memory access.
-==1757716==Hint: address points to the zero page.
-    #0 0x55876fadd4d3 in tint::glsl::writer::(anonymous namespace)::Printer::EmitConstant(tint::StringStream&, tint::core::constant::Value const*) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:509:16
-    #1 0x55876faf017c in tint::glsl::writer::(anonymous namespace)::Printer::EmitZeroValue(tint::StringStream&, tint::core::type::Type const*) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:470:9
-    #2 0x55876faeffd1 in tint::glsl::writer::(anonymous namespace)::Printer::EmitVar(tint::StringStream&, tint::core::ir::Var const*) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:461:13
-    #3 0x55876faef72f in tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*)::operator()(tint::core::ir::Var const*) const <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:239:47
-    #4 0x55876fada704 in auto auto tint::Switch<tint::detail::Infer, tint::core::ir::Instruction const, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Call const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Let const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Return const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Unreachable const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::NextIteration const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::ExitIf const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Access const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Bitcast const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Construct const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreBinary const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreUnary const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Load const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::LoadVectorElement const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Swizzle const*), tint::SwitchMustMatchCase>(tint::core::ir::Instruction const*, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Call const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Let const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Return const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Unreachable const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::NextIteration const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::ExitIf const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Access const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Bitcast const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Construct const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreBinary const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreUnary const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Load const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::LoadVectorElement const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Swizzle const*)&&, tint::SwitchMustMatchCase&&)::'lambda'(auto&&)::operator()<tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*)>(auto&&) const <dawn>/src/tint/utils/rtti/switch.h:347:25
-    #5 0x55876fad9a63 in auto tint::Switch<tint::detail::Infer, tint::core::ir::Instruction const, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Call const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Let const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Return const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Unreachable const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::NextIteration const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::ExitIf const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Access const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Bitcast const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Construct const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreBinary const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreUnary const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Load const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::LoadVectorElement const*), tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Swizzle const*), tint::SwitchMustMatchCase>(tint::core::ir::Instruction const*, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Call const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Let const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Return const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Unreachable const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Var const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::NextIteration const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::ExitIf const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Access const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Bitcast const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Construct const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreBinary const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::CoreUnary const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Load const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::LoadVectorElement const*)&&, tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*)::'lambda'(tint::core::ir::Swizzle const*)&&, tint::SwitchMustMatchCase&&) <dawn>/src/tint/utils/rtti/switch.h:358:22
-    #6 0x55876fad793a in tint::glsl::writer::(anonymous namespace)::Printer::EmitBlock(tint::core::ir::Block const*) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:233:13
-    #7 0x55876fad6b21 in tint::glsl::writer::(anonymous namespace)::Printer::Generate[abi:cxx11](tint::glsl::writer::Version const&) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:105:9
-    #8 0x55876fad602b in tint::glsl::writer::Print[abi:cxx11](tint::core::ir::Module&, tint::glsl::writer::Version const&) <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:596:28
-    #9 0x55876f622ebb in tint::glsl::writer::Generate(tint::core::ir::Module&, tint::glsl::writer::Options const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&) <dawn>/src/tint/lang/glsl/writer/writer.cc:48:19
-    #10 0x55876ee3e455 in (anonymous namespace)::GenerateGlsl(tint::Program const&, (anonymous namespace)::Options const&)::$_0::operator()(tint::Program const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, tint::ast::PipelineStage) const <dawn>/src/tint/cmd/tint/main.cc:1100:22
-    #11 0x55876ee26d35 in (anonymous namespace)::GenerateGlsl(tint::Program const&, (anonymous namespace)::Options const&) <dawn>/src/tint/cmd/tint/main.cc:1157:20
-    #12 0x55876ee0e861 in main <dawn>/src/tint/cmd/tint/main.cc:1434:23
-    #13 0x7fb515c43b89 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
-    #14 0x7fb515c43c44 in __libc_start_main csu/../csu/libc-start.c:360:3
-    #15 0x55876ed33000 in _start (<dawn>/out/Debug/tint+0x2b08000) (BuildId: e8af56752221240d6aa5bbe38e8d6c485d94acd9)
 
-AddressSanitizer can not provide additional info.
-SUMMARY: AddressSanitizer: SEGV <dawn>/src/tint/lang/glsl/writer/printer/printer.cc:509:16 in tint::glsl::writer::(anonymous namespace)::Printer::EmitConstant(tint::StringStream&, tint::core::constant::Value const*)
-==1757716==ABORTING
+struct Uniforms {
+  uint numTriangles;
+  uint gridSize;
+  uint pad1;
+  uint pad2;
+  vec3 bbMin;
+  uint tint_pad;
+  vec3 bbMax;
+  uint tint_pad_1;
+};
 
-tint executable returned error: exit status 1
+struct Dbg {
+  uint offsetCounter;
+  uint pad0;
+  uint pad1;
+  uint pad2;
+  uint value0;
+  uint value1;
+  uint value2;
+  uint value3;
+  float value_f32_0;
+  float value_f32_1;
+  float value_f32_2;
+  float value_f32_3;
+};
+
+layout(binding = 0, std140)
+uniform tint_symbol_1_1_ubo {
+  Uniforms tint_symbol;
+} v;
+layout(binding = 10, std430)
+buffer U32s_1_ssbo {
+  uint values[];
+} indices;
+layout(binding = 11, std430)
+buffer F32s_1_ssbo {
+  float values[];
+} positions;
+layout(binding = 20, std430)
+buffer AU32s_1_ssbo {
+  uint values[];
+} counters;
+layout(binding = 21, std430)
+buffer AI32s_1_ssbo {
+  int values[];
+} LUT;
+layout(binding = 50, std430)
+buffer tint_symbol_3_1_ssbo {
+  Dbg tint_symbol_2;
+} v_1;
+vec3 toVoxelPos(vec3 position) {
+  vec3 bbMin = vec3(v.tint_symbol.bbMin.x, v.tint_symbol.bbMin.y, v.tint_symbol.bbMin.z);
+  vec3 bbMax = vec3(v.tint_symbol.bbMax.x, v.tint_symbol.bbMax.y, v.tint_symbol.bbMax.z);
+  vec3 bbSize = (bbMax - bbMin);
+  float v_2 = max(bbSize.x, bbSize.y);
+  float cubeSize = max(v_2, bbSize.z);
+  float gridSize = float(v.tint_symbol.gridSize);
+  float gx = ((gridSize * (position[0u] - v.tint_symbol.bbMin.x)) / cubeSize);
+  float gy = ((gridSize * (position[1u] - v.tint_symbol.bbMin.y)) / cubeSize);
+  float gz = ((gridSize * (position[2u] - v.tint_symbol.bbMin.z)) / cubeSize);
+  return vec3(gx, gy, gz);
+}
+uvec3 tint_v3f32_to_v3u32(vec3 value) {
+  uvec3 v_3 = uvec3(value);
+  uvec3 v_4 = mix(uvec3(0u), v_3, greaterThanEqual(value, vec3(0.0f)));
+  return mix(uvec3(4294967295u), v_4, lessThanEqual(value, vec3(4294967040.0f)));
+}
+uint toIndex1D(uint gridSize, vec3 voxelPos) {
+  uvec3 icoord = tint_v3f32_to_v3u32(voxelPos);
+  return ((icoord.x + (gridSize * icoord.y)) + ((gridSize * gridSize) * icoord.z));
+}
+vec3 loadPosition(uint vertexIndex) {
+  vec3 position = vec3(positions.values[((3u * vertexIndex) + 0u)], positions.values[((3u * vertexIndex) + 1u)], positions.values[((3u * vertexIndex) + 2u)]);
+  return position;
+}
+void doIgnore() {
+  uint g42 = v.tint_symbol.numTriangles;
+  uint kj6 = v_1.tint_symbol_2.value1;
+  uint b53 = atomicOr(counters.values[0], 0u);
+  uint rwg = indices.values[0];
+  float rb5 = positions.values[0];
+  int g55 = atomicOr(LUT.values[0], 0);
+}
+void main_count_inner(uvec3 GlobalInvocationID) {
+  uint triangleIndex = GlobalInvocationID[0u];
+  if ((triangleIndex >= v.tint_symbol.numTriangles)) {
+    return;
+  }
+  doIgnore();
+  uint v_5 = ((3u * triangleIndex) + 0u);
+  uint i0 = indices.values[v_5];
+  uint v_6 = ((3u * triangleIndex) + 1u);
+  uint i1 = indices.values[v_6];
+  uint v_7 = ((3u * triangleIndex) + 2u);
+  uint i2 = indices.values[v_7];
+  vec3 p0 = loadPosition(i0);
+  vec3 p1 = loadPosition(i1);
+  vec3 p2 = loadPosition(i2);
+  vec3 center = (((p0 + p1) + p2) / 3.0f);
+  vec3 voxelPos = toVoxelPos(center);
+  uint voxelIndex = toIndex1D(v.tint_symbol.gridSize, voxelPos);
+  uint v_8 = voxelIndex;
+  uint acefg = atomicAdd(counters.values[v_8], 1u);
+  if ((triangleIndex == 0u)) {
+    v_1.tint_symbol_2.value0 = v.tint_symbol.gridSize;
+    v_1.tint_symbol_2.value_f32_0 = center.x;
+    v_1.tint_symbol_2.value_f32_1 = center.y;
+    v_1.tint_symbol_2.value_f32_2 = center.z;
+  }
+}
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+void main() {
+  main_count_inner(gl_GlobalInvocationID);
+}
+#version 310 es
+
+
+struct Uniforms {
+  uint numTriangles;
+  uint gridSize;
+  uint pad1;
+  uint pad2;
+  vec3 bbMin;
+  uint tint_pad;
+  vec3 bbMax;
+  uint tint_pad_1;
+};
+
+struct Dbg {
+  uint offsetCounter;
+  uint pad0;
+  uint pad1;
+  uint pad2;
+  uint value0;
+  uint value1;
+  uint value2;
+  uint value3;
+  float value_f32_0;
+  float value_f32_1;
+  float value_f32_2;
+  float value_f32_3;
+};
+
+layout(binding = 0, std140)
+uniform tint_symbol_1_1_ubo {
+  Uniforms tint_symbol;
+} v;
+layout(binding = 10, std430)
+buffer U32s_1_ssbo {
+  uint values[];
+} indices;
+layout(binding = 11, std430)
+buffer F32s_1_ssbo {
+  float values[];
+} positions;
+layout(binding = 20, std430)
+buffer AU32s_1_ssbo {
+  uint values[];
+} counters;
+layout(binding = 21, std430)
+buffer AI32s_1_ssbo {
+  int values[];
+} LUT;
+layout(binding = 50, std430)
+buffer tint_symbol_3_1_ssbo {
+  Dbg tint_symbol_2;
+} v_1;
+void doIgnore() {
+  uint g42 = v.tint_symbol.numTriangles;
+  uint kj6 = v_1.tint_symbol_2.value1;
+  uint b53 = atomicOr(counters.values[0], 0u);
+  uint rwg = indices.values[0];
+  float rb5 = positions.values[0];
+  int g55 = atomicOr(LUT.values[0], 0);
+}
+void main_create_lut_inner(uvec3 GlobalInvocationID) {
+  uint voxelIndex = GlobalInvocationID[0u];
+  doIgnore();
+  uint maxVoxels = ((v.tint_symbol.gridSize * v.tint_symbol.gridSize) * v.tint_symbol.gridSize);
+  if ((voxelIndex >= maxVoxels)) {
+    return;
+  }
+  uint v_2 = voxelIndex;
+  uint numTriangles = atomicOr(counters.values[v_2], 0u);
+  int offset = -1;
+  if ((numTriangles > 0u)) {
+    offset = int(atomicAdd(v_1.tint_symbol_2.offsetCounter, numTriangles));
+  }
+  uint v_3 = voxelIndex;
+  atomicExchange(LUT.values[v_3], offset);
+}
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+void main() {
+  main_create_lut_inner(gl_GlobalInvocationID);
+}
+#version 310 es
+
+
+struct Uniforms {
+  uint numTriangles;
+  uint gridSize;
+  uint pad1;
+  uint pad2;
+  vec3 bbMin;
+  uint tint_pad;
+  vec3 bbMax;
+  uint tint_pad_1;
+};
+
+struct Dbg {
+  uint offsetCounter;
+  uint pad0;
+  uint pad1;
+  uint pad2;
+  uint value0;
+  uint value1;
+  uint value2;
+  uint value3;
+  float value_f32_0;
+  float value_f32_1;
+  float value_f32_2;
+  float value_f32_3;
+};
+
+layout(binding = 0, std140)
+uniform tint_symbol_1_1_ubo {
+  Uniforms tint_symbol;
+} v;
+layout(binding = 10, std430)
+buffer U32s_1_ssbo {
+  uint values[];
+} indices;
+layout(binding = 11, std430)
+buffer F32s_1_ssbo {
+  float values[];
+} positions;
+layout(binding = 20, std430)
+buffer AU32s_1_ssbo {
+  uint values[];
+} counters;
+layout(binding = 21, std430)
+buffer AI32s_1_ssbo {
+  int values[];
+} LUT;
+layout(binding = 50, std430)
+buffer tint_symbol_3_1_ssbo {
+  Dbg tint_symbol_2;
+} v_1;
+vec3 toVoxelPos(vec3 position) {
+  vec3 bbMin = vec3(v.tint_symbol.bbMin.x, v.tint_symbol.bbMin.y, v.tint_symbol.bbMin.z);
+  vec3 bbMax = vec3(v.tint_symbol.bbMax.x, v.tint_symbol.bbMax.y, v.tint_symbol.bbMax.z);
+  vec3 bbSize = (bbMax - bbMin);
+  float v_2 = max(bbSize.x, bbSize.y);
+  float cubeSize = max(v_2, bbSize.z);
+  float gridSize = float(v.tint_symbol.gridSize);
+  float gx = ((gridSize * (position[0u] - v.tint_symbol.bbMin.x)) / cubeSize);
+  float gy = ((gridSize * (position[1u] - v.tint_symbol.bbMin.y)) / cubeSize);
+  float gz = ((gridSize * (position[2u] - v.tint_symbol.bbMin.z)) / cubeSize);
+  return vec3(gx, gy, gz);
+}
+uvec3 tint_v3f32_to_v3u32(vec3 value) {
+  uvec3 v_3 = uvec3(value);
+  uvec3 v_4 = mix(uvec3(0u), v_3, greaterThanEqual(value, vec3(0.0f)));
+  return mix(uvec3(4294967295u), v_4, lessThanEqual(value, vec3(4294967040.0f)));
+}
+uint toIndex1D(uint gridSize, vec3 voxelPos) {
+  uvec3 icoord = tint_v3f32_to_v3u32(voxelPos);
+  return ((icoord.x + (gridSize * icoord.y)) + ((gridSize * gridSize) * icoord.z));
+}
+vec3 loadPosition(uint vertexIndex) {
+  vec3 position = vec3(positions.values[((3u * vertexIndex) + 0u)], positions.values[((3u * vertexIndex) + 1u)], positions.values[((3u * vertexIndex) + 2u)]);
+  return position;
+}
+void doIgnore() {
+  uint g42 = v.tint_symbol.numTriangles;
+  uint kj6 = v_1.tint_symbol_2.value1;
+  uint b53 = atomicOr(counters.values[0], 0u);
+  uint rwg = indices.values[0];
+  float rb5 = positions.values[0];
+  int g55 = atomicOr(LUT.values[0], 0);
+}
+void main_sort_triangles_inner(uvec3 GlobalInvocationID) {
+  uint triangleIndex = GlobalInvocationID[0u];
+  doIgnore();
+  if ((triangleIndex >= v.tint_symbol.numTriangles)) {
+    return;
+  }
+  uint v_5 = ((3u * triangleIndex) + 0u);
+  uint i0 = indices.values[v_5];
+  uint v_6 = ((3u * triangleIndex) + 1u);
+  uint i1 = indices.values[v_6];
+  uint v_7 = ((3u * triangleIndex) + 2u);
+  uint i2 = indices.values[v_7];
+  vec3 p0 = loadPosition(i0);
+  vec3 p1 = loadPosition(i1);
+  vec3 p2 = loadPosition(i2);
+  vec3 center = (((p0 + p1) + p2) / 3.0f);
+  vec3 voxelPos = toVoxelPos(center);
+  uint voxelIndex = toIndex1D(v.tint_symbol.gridSize, voxelPos);
+  uint v_8 = voxelIndex;
+  int triangleOffset = atomicAdd(LUT.values[v_8], 1);
+}
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+void main() {
+  main_sort_triangles_inner(gl_GlobalInvocationID);
+}

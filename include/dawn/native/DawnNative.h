@@ -93,8 +93,6 @@ class DAWN_NATIVE_EXPORT Adapter {
     // those in webgpu_cpp.h. Update uses of these methods and remove them.
     wgpu::Status GetInfo(wgpu::AdapterInfo* info) const;
     wgpu::Status GetInfo(WGPUAdapterInfo* info) const;
-    wgpu::Status GetProperties(wgpu::AdapterProperties* properties) const;
-    wgpu::Status GetProperties(WGPUAdapterProperties* properties) const;
     std::vector<const char*> GetSupportedFeatures() const;
     wgpu::ConvertibleStatus GetLimits(WGPUSupportedLimits* limits) const;
 
@@ -290,12 +288,17 @@ class DAWN_NATIVE_EXPORT MemoryDump {
     static const char kUnitsBytes[];    // Unit name to represent bytes.
     static const char kUnitsObjects[];  // Unit name to represent #objects.
 
+    MemoryDump() = default;
+
     virtual void AddScalar(const char* name,
                            const char* key,
                            const char* units,
                            uint64_t value) = 0;
 
     virtual void AddString(const char* name, const char* key, const std::string& value) = 0;
+
+    MemoryDump(const MemoryDump&) = delete;
+    MemoryDump& operator=(const MemoryDump&) = delete;
 
   protected:
     virtual ~MemoryDump() = default;

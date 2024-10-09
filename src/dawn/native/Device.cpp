@@ -428,10 +428,14 @@ DeviceBase::DeviceBase(AdapterBase* adapter,
     mLimits.experimentalSubgroupLimits =
         GetPhysicalDevice()->GetLimits().experimentalSubgroupLimits;
 
+    // Get experimentalImmediateDataRangeByteSizeLimit from physical device
+    mLimits.experimentalImmediateDataLimits =
+        GetPhysicalDevice()->GetLimits().experimentalImmediateDataLimits;
+
     mFormatTable = BuildFormatTable(this);
 
-    if (descriptor->label != nullptr && strlen(descriptor->label) != 0) {
-        mLabel = descriptor->label;
+    if (!descriptor->label.IsUndefined()) {
+        mLabel = std::string(descriptor->label);
     }
 
     mIsImmediateErrorHandlingEnabled = IsToggleEnabled(Toggle::EnableImmediateErrorHandling);
@@ -490,7 +494,7 @@ MaybeError DeviceBase::Initialize(Ref<QueueBase> defaultQueue) {
                 @fragment fn fs_empty_main() {}
             )";
         ShaderModuleDescriptor descriptor;
-        ShaderModuleWGSLDescriptor wgslDesc;
+        ShaderSourceWGSL wgslDesc;
         wgslDesc.code = kEmptyFragmentShader;
         descriptor.nextInChain = &wgslDesc;
 
@@ -580,7 +584,6 @@ void DeviceBase::DestroyObjects() {
             ObjectType::RenderPipeline,
             ObjectType::ComputePipeline,
             ObjectType::PipelineLayout,
-            ObjectType::SwapChain,
             ObjectType::BindGroup,
             ObjectType::BindGroupLayout,
             ObjectType::ShaderModule,
@@ -976,8 +979,8 @@ MaybeError DeviceBase::ValidateIsAlive() const {
     return {};
 }
 
-void DeviceBase::APIForceLoss2(wgpu::DeviceLostReason reason, std::string_view message) {
-    message = utils::NormalizeLabel(message);
+void DeviceBase::APIForceLoss2(wgpu::DeviceLostReason reason, StringView messageIn) {
+    std::string_view message = utils::NormalizeMessageString(messageIn);
     if (mState != State::Alive) {
         return;
     }
@@ -1345,8 +1348,9 @@ CommandEncoder* DeviceBase::APICreateCommandEncoder(const CommandEncoderDescript
 }
 ComputePipelineBase* DeviceBase::APICreateComputePipeline(
     const ComputePipelineDescriptor* descriptor) {
+    utils::TraceLabel label = utils::GetLabelForTrace(descriptor->label);
     TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateComputePipeline", "label",
-                 utils::GetLabelForTrace(descriptor->label));
+                 label.label);
 
     auto resultOrError = CreateComputePipeline(descriptor);
     if (resultOrError.IsSuccess()) {
@@ -1399,8 +1403,9 @@ Future DeviceBase::APICreateComputePipelineAsyncF(
 Future DeviceBase::APICreateComputePipelineAsync2(
     const ComputePipelineDescriptor* descriptor,
     const WGPUCreateComputePipelineAsyncCallbackInfo2& callbackInfo) {
+    utils::TraceLabel label = utils::GetLabelForTrace(descriptor->label);
     TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateComputePipelineAsync", "label",
-                 utils::GetLabelForTrace(descriptor->label));
+                 label.label);
 
     EventManager* manager = GetInstance()->GetEventManager();
 
@@ -1500,8 +1505,9 @@ Future DeviceBase::APICreateRenderPipelineAsyncF(
 Future DeviceBase::APICreateRenderPipelineAsync2(
     const RenderPipelineDescriptor* descriptor,
     const WGPUCreateRenderPipelineAsyncCallbackInfo2& callbackInfo) {
+    utils::TraceLabel label = utils::GetLabelForTrace(descriptor->label);
     TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateRenderPipelineAsync", "label",
-                 utils::GetLabelForTrace(descriptor->label));
+                 label.label);
 
     EventManager* manager = GetInstance()->GetEventManager();
 
@@ -1550,8 +1556,9 @@ RenderBundleEncoder* DeviceBase::APICreateRenderBundleEncoder(
 }
 RenderPipelineBase* DeviceBase::APICreateRenderPipeline(
     const RenderPipelineDescriptor* descriptor) {
+    utils::TraceLabel label = utils::GetLabelForTrace(descriptor->label);
     TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateRenderPipeline", "label",
-                 utils::GetLabelForTrace(descriptor->label));
+                 label.label);
 
     auto resultOrError = CreateRenderPipeline(descriptor);
     if (resultOrError.IsSuccess()) {
@@ -1569,8 +1576,8 @@ RenderPipelineBase* DeviceBase::APICreateRenderPipeline(
     return ReturnToAPI(std::move(result));
 }
 ShaderModuleBase* DeviceBase::APICreateShaderModule(const ShaderModuleDescriptor* descriptor) {
-    TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateShaderModule", "label",
-                 utils::GetLabelForTrace(descriptor->label));
+    utils::TraceLabel label = utils::GetLabelForTrace(descriptor->label);
+    TRACE_EVENT1(GetPlatform(), General, "DeviceBase::APICreateShaderModule", "label", label.label);
 
     std::unique_ptr<OwnedCompilationMessages> compilationMessages(
         std::make_unique<OwnedCompilationMessages>());
@@ -1599,7 +1606,7 @@ ShaderModuleBase* DeviceBase::APICreateShaderModule(const ShaderModuleDescriptor
 }
 
 ShaderModuleBase* DeviceBase::APICreateErrorShaderModule2(const ShaderModuleDescriptor* descriptor,
-                                                          std::string_view errorMessage) {
+                                                          StringView errorMessage) {
     Ref<ShaderModuleBase> result =
         ShaderModuleBase::MakeError(this, descriptor ? descriptor->label : nullptr);
     std::unique_ptr<OwnedCompilationMessages> compilationMessages(
@@ -1614,26 +1621,6 @@ ShaderModuleBase* DeviceBase::APICreateErrorShaderModule2(const ShaderModuleDesc
 
     return ReturnToAPI(std::move(result));
 }
-SwapChainBase* DeviceBase::APICreateSwapChain(Surface* surface,
-                                              const SwapChainDescriptor* descriptor) {
-    Ref<SwapChainBase> result;
-    if (ConsumedError(CreateSwapChain(surface, descriptor), &result,
-                      "calling %s.CreateSwapChain(%s).", this, descriptor)) {
-        SurfaceConfiguration config;
-        config.nextInChain = descriptor->nextInChain;
-        config.device = this;
-        config.width = descriptor->width;
-        config.height = descriptor->height;
-        config.format = descriptor->format;
-        config.usage = descriptor->usage;
-        config.presentMode = descriptor->presentMode;
-        config.viewFormatCount = 0;
-        config.viewFormats = nullptr;
-        config.alphaMode = wgpu::CompositeAlphaMode::Opaque;
-        result = SwapChainBase::MakeError(this, &config);
-    }
-    return ReturnToAPI(std::move(result));
-}
 TextureBase* DeviceBase::APICreateTexture(const TextureDescriptor* descriptor) {
     Ref<TextureBase> result;
     if (ConsumedError(CreateTexture(descriptor), &result, InternalErrorType::OutOfMemory,
@@ -1641,15 +1628,6 @@ TextureBase* DeviceBase::APICreateTexture(const TextureDescriptor* descriptor) {
         result = TextureBase::MakeError(this, descriptor);
     }
     return ReturnToAPI(std::move(result));
-}
-
-wgpu::TextureUsage DeviceBase::APIGetSupportedSurfaceUsage(Surface* surface) {
-    wgpu::TextureUsage result;
-    if (ConsumedError(GetSupportedSurfaceUsage(surface), &result,
-                      "calling %s.GetSupportedSurfaceUsage().", this)) {
-        return wgpu::TextureUsage::None;
-    }
-    return result;
 }
 
 // For Dawn Wire
@@ -1986,6 +1964,7 @@ wgpu::Status DeviceBase::APIGetLimits(SupportedLimits* limits) const {
     limits->limits = mLimits.v1;
 
     if (auto* subgroupLimits = unpacked.Get<DawnExperimentalSubgroupLimits>()) {
+        wgpu::ChainedStructOut* originalChain = subgroupLimits->nextInChain;
         // TODO(349125474): Remove deprecated ChromiumExperimentalSubgroups.
         if (!(HasFeature(Feature::Subgroups) ||
               HasFeature(Feature::ChromiumExperimentalSubgroups))) {
@@ -1996,6 +1975,24 @@ wgpu::Status DeviceBase::APIGetLimits(SupportedLimits* limits) const {
         } else {
             *subgroupLimits = mLimits.experimentalSubgroupLimits;
         }
+
+        // Recover origin chain.
+        subgroupLimits->nextInChain = originalChain;
+    }
+
+    if (auto* immediateDataLimits = unpacked.Get<DawnExperimentalImmediateDataLimits>()) {
+        wgpu::ChainedStructOut* originalChain = immediateDataLimits->nextInChain;
+        if (!HasFeature(Feature::ChromiumExperimentalImmediateData)) {
+            // If immediate data feature is not enabled, return the default-initialized
+            // DawnExperimentalImmediateDataLimits object, where maxImmediateDataRangeByteSize and
+            // are WGPU_LIMIT_U32_UNDEFINED.
+            *immediateDataLimits = DawnExperimentalImmediateDataLimits{};
+        } else {
+            *immediateDataLimits = mLimits.experimentalImmediateDataLimits;
+        }
+
+        // Recover origin chain.
+        immediateDataLimits->nextInChain = originalChain;
     }
 
     return wgpu::Status::Success;
@@ -2009,7 +2006,7 @@ size_t DeviceBase::APIEnumerateFeatures(wgpu::FeatureName* features) const {
     return mEnabledFeatures.EnumerateFeatures(features);
 }
 
-void DeviceBase::APIInjectError2(wgpu::ErrorType type, std::string_view message) {
+void DeviceBase::APIInjectError2(wgpu::ErrorType type, StringView message) {
     if (ConsumedError(ValidateErrorType(type))) {
         return;
     }
@@ -2022,7 +2019,7 @@ void DeviceBase::APIInjectError2(wgpu::ErrorType type, std::string_view message)
         return;
     }
 
-    message = utils::NormalizeLabel(message);
+    message = utils::NormalizeMessageString(message);
     HandleError(DAWN_MAKE_ERROR(FromWGPUErrorType(type), std::string(message)),
                 InternalErrorType::OutOfMemory);
 }
@@ -2314,47 +2311,6 @@ ResultOrError<Ref<ShaderModuleBase>> DeviceBase::CreateShaderModule(
     return GetOrCreateShaderModule(unpacked, internalExtensions, &parseResult, compilationMessages);
 }
 
-ResultOrError<Ref<SwapChainBase>> DeviceBase::CreateSwapChain(
-    Surface* surface,
-    const SwapChainDescriptor* descriptor) {
-    GetInstance()->EmitDeprecationWarning(
-        "The explicit creation of a SwapChain object is deprecated and should be replaced by "
-        "Surface configuration.");
-
-    DAWN_TRY(ValidateIsAlive());
-    if (IsValidationEnabled()) {
-        DAWN_TRY_CONTEXT(ValidateSwapChainDescriptor(this, surface, descriptor), "validating %s",
-                         descriptor);
-    }
-
-    SurfaceConfiguration config;
-    config.nextInChain = descriptor->nextInChain;
-    config.device = this;
-    config.width = descriptor->width;
-    config.height = descriptor->height;
-    config.format = descriptor->format;
-    config.usage = descriptor->usage;
-    config.presentMode = descriptor->presentMode;
-    config.viewFormatCount = 0;
-    config.viewFormats = nullptr;
-    config.alphaMode = wgpu::CompositeAlphaMode::Opaque;
-
-    SwapChainBase* previousSwapChain = surface->GetAttachedSwapChain();
-    ResultOrError<Ref<SwapChainBase>> maybeNewSwapChain =
-        CreateSwapChainImpl(surface, previousSwapChain, &config);
-
-    if (previousSwapChain != nullptr) {
-        previousSwapChain->DetachFromSurface();
-    }
-
-    Ref<SwapChainBase> newSwapChain;
-    DAWN_TRY_ASSIGN(newSwapChain, std::move(maybeNewSwapChain));
-
-    newSwapChain->SetIsAttached();
-    surface->SetAttachedSwapChain(newSwapChain.Get());
-    return newSwapChain;
-}
-
 ResultOrError<Ref<SwapChainBase>> DeviceBase::CreateSwapChain(Surface* surface,
                                                               SwapChainBase* previousSwapChain,
                                                               const SurfaceConfiguration* config) {
@@ -2404,23 +2360,6 @@ ResultOrError<Ref<TextureViewBase>> DeviceBase::CreateTextureView(
         descriptor = Unpack(&desc);
     }
     return CreateTextureViewImpl(texture, descriptor);
-}
-
-ResultOrError<wgpu::TextureUsage> DeviceBase::GetSupportedSurfaceUsage(
-    const Surface* surface) const {
-    GetInstance()->EmitDeprecationWarning(
-        "GetSupportedSurfaceUsage is deprecated, use surface.GetCapabilities(adapter).usages.");
-
-    DAWN_TRY(ValidateIsAlive());
-
-    if (IsValidationEnabled()) {
-        DAWN_INVALID_IF(!HasFeature(Feature::SurfaceCapabilities), "%s is not enabled.",
-                        wgpu::FeatureName::SurfaceCapabilities);
-    }
-
-    PhysicalDeviceSurfaceCapabilities caps;
-    DAWN_TRY_ASSIGN(caps, GetPhysicalDevice()->GetSurfaceCapabilities(GetInstance(), surface));
-    return caps.usages;
 }
 
 // Other implementation details
@@ -2501,8 +2440,8 @@ void DeviceBase::APISetLabel(const char* label) {
     SetLabelImpl();
 }
 
-void DeviceBase::APISetLabel2(std::optional<std::string_view> label) {
-    mLabel = utils::NormalizeLabel(label);
+void DeviceBase::APISetLabel2(StringView label) {
+    mLabel = utils::NormalizeMessageString(label);
     SetLabelImpl();
 }
 
@@ -2519,6 +2458,10 @@ bool DeviceBase::MayRequireDuplicationOfIndirectParameters() const {
 
 bool DeviceBase::ShouldDuplicateParametersForDrawIndirect(
     const RenderPipelineBase* renderPipelineBase) const {
+    return false;
+}
+
+bool DeviceBase::BackendWillValidateMultiDraw() const {
     return false;
 }
 

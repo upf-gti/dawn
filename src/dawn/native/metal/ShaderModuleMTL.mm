@@ -290,8 +290,6 @@ ResultOrError<CacheResult<MslCompilation>> TranslateToMSL(
     req.use_tint_ir = device->IsToggleEnabled(Toggle::UseTintIR);
     req.tintOptions.disable_polyfill_integer_div_mod =
         device->IsToggleEnabled(Toggle::DisablePolyfillsOnIntegerDivisonAndModulo);
-    req.tintOptions.polyfill_dot_4x8_packed =
-        device->IsToggleEnabled(Toggle::PolyFillPacked4x8DotProduct);
 
     const CombinedLimits& limits = device->GetLimits();
     req.limits = LimitsForCompilationRequest::Create(limits.v1);
@@ -424,7 +422,7 @@ MaybeError ShaderModule::CreateFunction(SingleShaderStage stage,
                                         const RenderPipeline* renderPipeline,
                                         std::optional<uint32_t> maxSubgroupSizeForFullSubgroups) {
     TRACE_EVENT1(GetDevice()->GetPlatform(), General, "metal::ShaderModule::CreateFunction",
-                 "label", utils::GetLabelForTrace(GetLabel().c_str()));
+                 "label", utils::GetLabelForTrace(GetLabel()));
 
     DAWN_ASSERT(!IsError());
     DAWN_ASSERT(out);
