@@ -689,8 +689,15 @@ ResultOrError<VulkanDeviceKnobs> Device::CreateDevice(VkPhysicalDevice vkPhysica
     createInfo.ppEnabledExtensionNames = extensionNames.data();
     createInfo.pEnabledFeatures = nullptr;
 
-    DAWN_TRY(CheckVkSuccess(fn.CreateDevice(vkPhysicalDevice, &createInfo, nullptr, &mVkDevice),
-                            "vkCreateDevice"));
+    auto xrConfig = ToBackend(GetPhysicalDevice())->GetOpenXRConfig();
+    if (xrConfig != nullptr) {
+        DAWN_TRY(CheckVkSuccess(xrConfig->CreateVkDevice(fn.GetInstanceProcAddr, vkPhysicalDevice,
+                                                         &createInfo, nullptr, &mVkDevice),
+                                "OpenXR::CreateVkDevice"));
+    } else {
+        DAWN_TRY(CheckVkSuccess(fn.CreateDevice(vkPhysicalDevice, &createInfo, nullptr, &mVkDevice),
+                                "vkCreateDevice"));
+    }
 
     return usedKnobs;
 }

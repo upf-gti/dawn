@@ -34,12 +34,46 @@
 // of the non-dispatchable handles.
 #include "dawn/common/vulkan_platform.h"
 
+#include "dawn/native/ChainUtils.h"
+
 #include "dawn/native/VulkanBackend.h"
 
 #include "dawn/native/vulkan/DeviceVk.h"
 #include "dawn/native/vulkan/TextureVk.h"
 
+#include "dawn/native/vulkan/PhysicalDeviceVk.h"    // For OpenXR
+
 namespace dawn::native::vulkan {
+
+// ***** Begin OpenXR *****
+
+RequestAdapterOptionsOpenXRConfig::RequestAdapterOptionsOpenXRConfig() {
+    sType = wgpu::SType::RequestAdapterOptionsOpenXRConfig;
+}
+
+VkPhysicalDevice GetVkPhysicalDevice(WGPUDevice device) {
+    Device* backendDevice = ToBackend(FromAPI(device));
+    return ToBackend(backendDevice->GetPhysicalDevice())->GetVkPhysicalDevice();
+}
+
+uint32_t GetGraphicsQueueFamily(WGPUDevice device) {
+    Device* backendDevice = ToBackend(FromAPI(device));
+    return backendDevice->GetGraphicsQueueFamily();
+}
+
+WGPUTexture CreateSwapchainWGPUTexture(WGPUDevice device,
+                                       const WGPUTextureDescriptor* descriptor,
+                                       VkImage_T* image) {
+    Device* backendDevice = ToBackend(FromAPI(device));
+
+    auto texture = SwapChainTexture::Create(backendDevice,
+                                            ValidateAndUnpack(FromAPI(descriptor)).AcquireSuccess(),
+                                            VkImage::CreateFromHandle(image));
+
+    return ToAPI(texture.Detach());
+}
+
+// ***** End OpenXR *****
 
 VkInstance GetInstance(WGPUDevice device) {
     Device* backendDevice = ToBackend(FromAPI(device));
