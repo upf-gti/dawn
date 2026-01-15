@@ -327,13 +327,13 @@ const std::vector<VkPhysicalDevice>& VulkanInstance::GetVkPhysicalDevices() cons
 }
 
 // static
-ResultOrError<Ref<VulkanInstance>> VulkanInstance::Create(const InstanceBase* instance, ICD icd) {
+ResultOrError<Ref<VulkanInstance>> VulkanInstance::Create(const InstanceBase* instance, const OpenXRConfig* xrConfig, ICD icd) {
     Ref<VulkanInstance> vulkanInstance = AcquireRef(new VulkanInstance());
-    DAWN_TRY(vulkanInstance->Initialize(instance, icd));
+    DAWN_TRY(vulkanInstance->Initialize(instance, xrConfig, icd));
     return std::move(vulkanInstance);
 }
 
-MaybeError VulkanInstance::Initialize(const InstanceBase* instance, ICD icd) {
+MaybeError VulkanInstance::Initialize(const InstanceBase* instance, const OpenXRConfig* xrConfig, ICD icd) {
     // These environment variables need only be set while loading procs and gathering device
     // info.
     ScopedEnvironmentVar vkICDFilenames;
@@ -391,7 +391,7 @@ MaybeError VulkanInstance::Initialize(const InstanceBase* instance, ICD icd) {
     }
 
     VulkanGlobalKnobs usedGlobalKnobs = {};
-    DAWN_TRY_ASSIGN(usedGlobalKnobs, CreateVkInstance(instance));
+    DAWN_TRY_ASSIGN(usedGlobalKnobs, CreateVkInstance(instance, xrConfig));
     *static_cast<VulkanGlobalKnobs*>(&mGlobalInfo) = usedGlobalKnobs;
 
     DAWN_TRY(mFunctions.LoadInstanceProcs(mInstance, mGlobalInfo));
@@ -400,12 +400,20 @@ MaybeError VulkanInstance::Initialize(const InstanceBase* instance, ICD icd) {
         DAWN_TRY(RegisterDebugUtils());
     }
 
-    DAWN_TRY_ASSIGN(mVkPhysicalDevices, GatherPhysicalDevices(mInstance, mFunctions));
+    if (xrConfig != nullptr) {
+        VkPhysicalDevice device;
+        if (xrConfig->GetVkPhysicalDevice(mInstance, &device) != VK_SUCCESS) {
+            return DAWN_INTERNAL_ERROR("Failed to get VkPhysicalDevice from OpenXR ");
+        }
+        mVkPhysicalDevices.push_back(device);
+    } else {
+        DAWN_TRY_ASSIGN(mVkPhysicalDevices, GatherPhysicalDevices(mInstance, mFunctions));
+    }
 
     return {};
 }
 
-ResultOrError<VulkanGlobalKnobs> VulkanInstance::CreateVkInstance(const InstanceBase* instance) {
+ResultOrError<VulkanGlobalKnobs> VulkanInstance::CreateVkInstance(const InstanceBase* instance, const OpenXRConfig* xrConfig) {
     VulkanGlobalKnobs usedKnobs = {};
     std::vector<const char*> layerNames;
     InstanceExtSet extensionsToRequest = mGlobalInfo.extensions;
@@ -500,8 +508,15 @@ ResultOrError<VulkanGlobalKnobs> VulkanInstance::CreateVkInstance(const Instance
         createInfoChain.Add(&validationFeatures, VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT);
     }
 
-    DAWN_TRY(CheckVkSuccess(mFunctions.CreateInstance(&createInfo, nullptr, &mInstance),
-                            "vkCreateInstance"));
+    if (xrConfig != nullptr) {
+        DAWN_TRY(CheckVkSuccess(xrConfig->CreateVkInstance(mFunctions.GetInstanceProcAddr,
+                                                           &createInfo, nullptr, &mInstance),
+                                "OpenXRConfig::CreateVkInstance"));
+    } else {
+        DAWN_TRY(CheckVkSuccess(mFunctions.CreateInstance(&createInfo, nullptr, &mInstance),
+                                "vkCreateInstance"));
+    }
+
     DAWN_INVALID_IF(mInstance == VK_NULL_HANDLE, "Failed to create VkInstance");
 
     return usedKnobs;
@@ -561,13 +576,22 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
             continue;
         }
         if (mPhysicalDevices[icd].empty()) {
+
+            const OpenXRConfig* xrConfig = nullptr;
+            for (auto opt = options->nextInChain; opt; opt = opt->nextInChain) {
+                if (opt->sType == wgpu::SType::RequestAdapterOptionsOpenXRConfig) {
+                    xrConfig = static_cast<const RequestAdapterOptionsOpenXRConfig*>(opt)->openXRConfig;
+                    break;
+                }
+            }
+
             if (!mVulkanInstancesCreated[icd]) {
                 mVulkanInstancesCreated.set(icd);
 
                 [[maybe_unused]] bool hadError =
                     instance->ConsumedErrorAndWarnOnce([&]() -> MaybeError {
                         DAWN_TRY_ASSIGN(mVulkanInstances[icd],
-                                        VulkanInstance::Create(instance, icd));
+                                        VulkanInstance::Create(instance, xrConfig, icd));
                         return {};
                     }());
             }
@@ -581,7 +605,7 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
                 mVulkanInstances[icd]->GetVkPhysicalDevices();
             for (VkPhysicalDevice vkPhysicalDevice : vkPhysicalDevices) {
                 Ref<PhysicalDevice> physicalDevice =
-                    AcquireRef(new PhysicalDevice(mVulkanInstances[icd].Get(), vkPhysicalDevice));
+                    AcquireRef(new PhysicalDevice(mVulkanInstances[icd].Get(), vkPhysicalDevice, xrConfig));
                 if (instance->ConsumedErrorAndWarnOnce(physicalDevice->Initialize())) {
                     continue;
                 }

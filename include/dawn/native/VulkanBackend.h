@@ -35,7 +35,46 @@
 
 #include "dawn/native/DawnNative.h"
 
+#include <functional>  // For OpenXR
+
 namespace dawn::native::vulkan {
+
+// ***** Begin OpenXR *****
+
+DAWN_NATIVE_EXPORT VkPhysicalDevice GetVkPhysicalDevice(WGPUDevice device);
+
+DAWN_NATIVE_EXPORT VkDevice GetVkDevice(WGPUDevice device);
+
+DAWN_NATIVE_EXPORT uint32_t GetGraphicsQueueFamily(WGPUDevice device);
+
+DAWN_NATIVE_EXPORT WGPUTexture CreateSwapchainWGPUTexture(WGPUDevice device,
+                                                          const WGPUTextureDescriptor* descriptor,
+                                                          VkImage_T* image);
+
+struct OpenXRConfig {
+    std::function<::VkResult(PFN_vkGetInstanceProcAddr,
+                             const VkInstanceCreateInfo*,
+                             const VkAllocationCallbacks*,
+                             VkInstance*)>
+        CreateVkInstance;
+
+    std::function<::VkResult(VkInstance, VkPhysicalDevice*)> GetVkPhysicalDevice;
+
+    std::function<::VkResult(PFN_vkGetInstanceProcAddr,
+                             VkPhysicalDevice,
+                             const VkDeviceCreateInfo*,
+                             const VkAllocationCallbacks*,
+                             VkDevice*)>
+        CreateVkDevice;
+};
+
+struct DAWN_NATIVE_EXPORT RequestAdapterOptionsOpenXRConfig : wgpu::ChainedStruct {
+    RequestAdapterOptionsOpenXRConfig();
+
+    const OpenXRConfig* openXRConfig;
+};
+
+// ***** End OpenXR *****
 
 DAWN_NATIVE_EXPORT VkInstance GetInstance(WGPUDevice device);
 
