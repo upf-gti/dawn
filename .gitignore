@@ -10,6 +10,7 @@
 /.reproxy_cache
 /bazel-*
 /build
+/build_windows
 /buildtools
 /testing
 /third_party/abseil-cpp/

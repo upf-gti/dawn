@@ -310,4 +310,12 @@ bool IsDeviceLost(WGPUDevice device) {
     return FromAPI(device)->IsLost();
 }
 
+WGPUAdapter GetWGPUAdapter(WGPUDevice device) {
+    return ToAPI(FromAPI(device)->GetAdapter());
+}
+
+WGPUBackendType GetWGPUBackendType(WGPUAdapter adapter) {
+    return ToAPI(FromAPI(adapter)->GetPhysicalDevice()->GetBackendType());
+}
+
 }  // namespace dawn::native

@@ -115,10 +115,11 @@ bool VKComponentTypeToWGPUSubgroupMatrixComponentType(
 
 }  // anonymous namespace
 
-PhysicalDevice::PhysicalDevice(VulkanInstance* vulkanInstance, VkPhysicalDevice physicalDevice)
+PhysicalDevice::PhysicalDevice(VulkanInstance* vulkanInstance, VkPhysicalDevice physicalDevice, const OpenXRConfig* xrConfig)
     : PhysicalDeviceBase(wgpu::BackendType::Vulkan),
       mVkPhysicalDevice(physicalDevice),
-      mVulkanInstance(vulkanInstance) {}
+      mVulkanInstance(vulkanInstance),
+      mOpenXRConfig(xrConfig){}
 
 PhysicalDevice::~PhysicalDevice() = default;
 
@@ -132,6 +133,10 @@ VkPhysicalDevice PhysicalDevice::GetVkPhysicalDevice() const {
 
 VulkanInstance* PhysicalDevice::GetVulkanInstance() const {
     return mVulkanInstance.Get();
+}
+
+const OpenXRConfig* PhysicalDevice::GetOpenXRConfig() const {
+    return mOpenXRConfig;
 }
 
 bool PhysicalDevice::IsDepthStencilFormatSupported(VkFormat format) const {

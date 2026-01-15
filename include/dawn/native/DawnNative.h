@@ -361,6 +361,10 @@ DAWN_NATIVE_EXPORT void PerformIdleTasks(const wgpu::Device& device);
 
 DAWN_NATIVE_EXPORT bool IsDeviceLost(WGPUDevice device);
 
+DAWN_NATIVE_EXPORT WGPUAdapter GetWGPUAdapter(WGPUDevice device);
+
+DAWN_NATIVE_EXPORT WGPUBackendType GetWGPUBackendType(WGPUAdapter adapter);
+
 }  // namespace dawn::native
 
 #endif  // INCLUDE_DAWN_NATIVE_DAWNNATIVE_H_
