@@ -566,12 +566,13 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
     std::vector<Ref<PhysicalDeviceBase>> physicalDevices;
     InstanceBase* instance = GetInstance();
     for (ICD icd : kICDs) {
-#if DAWN_PLATFORM_IS(MACOS)
-        // On Mac, we don't expect non-Swiftshader Vulkan to be available.
-        if (icd == ICD::None) {
-            continue;
-        }
-#endif  // DAWN_PLATFORM_IS(MACOS)
+        // The macOS ICD::None skip that used to live here was based on the
+        // assumption that no non-SwiftShader Vulkan is available on macOS.
+        // KosmicKrisp (LunarG's conformant Vulkan-on-Metal driver for Apple
+        // Silicon, Vulkan 1.3 CTS pass announced 2025) ships through the
+        // standard Vulkan loader as a normal ICD::None candidate. Skipping
+        // it here prevented Dawn from discovering KosmicKrisp on Mac even
+        // when the loader had it active. Removed so the loader probe runs.
         if (options->forceFallbackAdapter && icd != ICD::SwiftShader) {
             continue;
         }
