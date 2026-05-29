@@ -35,6 +35,7 @@
 
 #include "src/dawn/common/Log.h"
 #include "src/dawn/common/Math.h"
+#include "src/dawn/native/ChainUtils.h"
 #include "src/dawn/native/d3d12/DeviceD3D12.h"
 #include "src/dawn/native/d3d12/ResidencyManagerD3D12.h"
 #include "src/dawn/native/d3d12/TextureD3D12.h"
@@ -52,6 +53,22 @@ Microsoft::WRL::ComPtr<ID3D12CommandQueue> GetD3D12CommandQueue(WGPUDevice devic
 Microsoft::WRL::ComPtr<ID3D12Device> GetD3D12Device(WGPUDevice device) {
     return ToBackend(FromAPI(device))->GetD3D12Device();
 }
+
+// ***** Begin OpenXR *****
+
+WGPUTexture CreateSwapchainWGPUTexture(WGPUDevice device,
+                                       const WGPUTextureDescriptor* descriptor,
+                                       ID3D12Resource* d3dTexture) {
+
+    auto texture = Texture::CreateForSwapChain(ToBackend(FromAPI(device)), ValidateAndUnpack(FromAPI(descriptor)).AcquireSuccess(),
+                                               d3dTexture, D3D12_RESOURCE_STATE_COMMON);
+    if (texture.IsSuccess()) {
+        return ToAPI(texture.AcquireSuccess().Detach());
+    }
+    return nullptr;
+}
+
+// ***** End OpenXR *****
 
 uint64_t SetExternalMemoryReservation(WGPUDevice device,
                                       uint64_t requestedReservationSize,
